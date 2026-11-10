@@ -632,6 +632,12 @@ export async function checkSunatMailbox(
         })
         .then(() => 'LOGGED_IN' as const),
       page
+        .waitForSelector('#btnWithOutCode', {
+          state: 'visible',
+          timeout: config.navigationTimeoutMs,
+        })
+        .then(() => 'MFA_WITHOUT_CODE' as const),
+      page
         .waitForSelector('#divMensajeError:not(.hidden)', {
           state: 'visible',
           timeout: config.navigationTimeoutMs,
@@ -644,6 +650,22 @@ export async function checkSunatMailbox(
         })
         .then(() => 'CAPTCHA' as const),
     ]);
+
+    if (outcome === 'MFA_WITHOUT_CODE') {
+      const btnWithoutCode = page.locator('#btnWithOutCode').first();
+      await btnWithoutCode.click({ timeout: 5000 }).catch(() => {});
+
+      await Promise.race([
+        page.waitForURL((url) => !url.hostname.includes('api-seguridad.sunat.gob.pe'), {
+          timeout: config.navigationTimeoutMs,
+          waitUntil: 'domcontentloaded',
+        }),
+        page.waitForSelector('#divBuzon, #btnBuzon, [onclick*="buzon" i], a[href*="buzon" i]', {
+          state: 'attached',
+          timeout: config.navigationTimeoutMs,
+        }),
+      ]).catch(() => {});
+    }
 
     if (outcome === 'AUTH_ERROR') {
       const errorText =
@@ -844,6 +866,12 @@ export async function markMultipleNotificationsAsReadInSunat(
         })
         .then(() => 'LOGGED_IN' as const),
       page
+        .waitForSelector('#btnWithOutCode', {
+          state: 'visible',
+          timeout: config.navigationTimeoutMs,
+        })
+        .then(() => 'MFA_WITHOUT_CODE' as const),
+      page
         .waitForSelector('#divMensajeError:not(.hidden)', {
           state: 'visible',
           timeout: config.navigationTimeoutMs,
@@ -857,7 +885,21 @@ export async function markMultipleNotificationsAsReadInSunat(
         .then(() => 'CAPTCHA' as const),
     ]);
 
-    if (outcome !== 'LOGGED_IN') {
+    if (outcome === 'MFA_WITHOUT_CODE') {
+      const btnWithoutCode = page.locator('#btnWithOutCode').first();
+      await btnWithoutCode.click({ timeout: 5000 }).catch(() => {});
+
+      await Promise.race([
+        page.waitForURL((url) => !url.hostname.includes('api-seguridad.sunat.gob.pe'), {
+          timeout: config.navigationTimeoutMs,
+          waitUntil: 'domcontentloaded',
+        }),
+        page.waitForSelector('#divBuzon, #btnBuzon, [onclick*="buzon" i], a[href*="buzon" i]', {
+          state: 'attached',
+          timeout: config.navigationTimeoutMs,
+        }),
+      ]).catch(() => {});
+    } else if (outcome !== 'LOGGED_IN') {
       throw new Error(
         outcome === 'CAPTCHA'
           ? 'SUNAT solicitó captcha. No se pudo iniciar sesión.'
