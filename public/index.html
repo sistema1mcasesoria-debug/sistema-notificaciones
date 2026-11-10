@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Monitor Buzón SUNAT — Panel Centralizado</title>
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b57d0'/%3E%3Ctext x='50%25' y='55%25' dominant-baseline='middle' text-anchor='middle' fill='white' font-family='system-ui,sans-serif' font-weight='800' font-size='24'%3ESOL%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">SOL</div>
+          <div>
+            <h1>Monitor Buzón SUNAT</h1>
+            <p class="brand-subtitle">Bandeja centralizada de notificaciones y claves cifradas</p>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <div id="monitor-pill" class="status-pill" role="status" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="monitor-pill-text">En espera</span>
+          </div>
+
+          <button type="button" id="btn-open-add-client" class="btn btn-secondary">
+            + Nuevo cliente
+          </button>
+          <button type="button" id="btn-check-all" class="btn btn-primary">
+            Revisar todos ahora
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <!-- Indicador de carga en segundo plano -->
+      <section
+        id="loading-banner"
+        class="loading-banner"
+        role="status"
+        aria-live="polite"
+        hidden
+      >
+        <progress
+          aria-label="Cargando revisión de buzones SUNAT"
+          class="loading-spinner"
+        ></progress>
+        <div class="loading-banner-copy">
+          <strong>Cargando: revisando buzones SUNAT en segundo plano...</strong>
+          <span id="loading-banner-detail">
+            Iniciando navegador oculto, por favor espera unos segundos.
+          </span>
+        </div>
+      </section>
+
+      <!-- Tarjetas KPI / Semáforo -->
+      <section class="kpi-grid" aria-label="Resumen del estado actual">
+        <article class="kpi-card kpi-alerts" id="card-unread">
+          <span class="kpi-label">Alertas nuevas</span>
+          <strong class="kpi-value" id="kpi-unread">0</strong>
+          <span class="kpi-meta" id="kpi-unread-meta">Sin notificaciones pendientes</span>
+        </article>
+
+        <article class="kpi-card">
+          <span class="kpi-label">Clientes monitoreados</span>
+          <strong class="kpi-value" id="kpi-clients">0</strong>
+          <span class="kpi-meta" id="kpi-clients-meta">0 activos registrados</span>
+        </article>
+
+        <article class="kpi-card" id="card-errors">
+          <span class="kpi-label">Con error / Captcha</span>
+          <strong class="kpi-value" id="kpi-errors">0</strong>
+          <span class="kpi-meta" id="kpi-errors-meta">Accesos funcionando</span>
+        </article>
+
+        <article class="kpi-card">
+          <span class="kpi-label">Última revisión</span>
+          <strong class="kpi-value kpi-value-sm" id="kpi-last-check">Nunca</strong>
+          <span class="kpi-meta">Hora local (Perú)</span>
+        </article>
+      </section>
+
+      <!-- Barra de pestañas -->
+      <section class="workspace" aria-label="Área principal">
+        <div class="tablist" role="tablist" aria-label="Vistas del sistema">
+          <button
+            type="button"
+            role="tab"
+            id="tab-inbox"
+            aria-selected="true"
+            tabindex="0"
+            data-panel="panel-inbox"
+          >
+            Bandeja de Notificaciones
+            <span class="tab-badge" id="tab-badge-unread" hidden>0</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-clients"
+            aria-selected="false"
+            tabindex="-1"
+            data-panel="panel-clients"
+          >
+            Clientes SUNAT
+            <span class="tab-badge tab-badge-neutral" id="tab-badge-clients">0</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            id="tab-runs"
+            aria-selected="false"
+            tabindex="-1"
+            data-panel="panel-runs"
+          >
+            Historial de Revisiones
+          </button>
+        </div>
+
+        <!-- PANEL 1: BANDEJA DE NOTIFICACIONES -->
+        <div
+          id="panel-inbox"
+          role="tabpanel"
+          aria-labelledby="tab-inbox"
+          class="tab-panel"
+        >
+          <div class="panel-surface">
+            <div class="toolbar">
+              <search class="search-area">
+                <form id="filter-form" class="filter-form">
+                  <div class="filter-field filter-grow">
+                    <label for="filter-query">Buscar notificación</label>
+                    <input
+                      type="search"
+                      id="filter-query"
+                      name="q"
+                      placeholder="Asunto, RUC, cliente o código..."
+                      autocomplete="off"
+                      autocorrect="off"
+                      spellcheck="false"
+                    />
+                  </div>
+
+                  <div class="filter-field">
+                    <label for="filter-client">Cliente</label>
+                    <select id="filter-client" name="clientId">
+                      <option value="">Todos los clientes</option>
+                    </select>
+                  </div>
+
+                  <div class="filter-check">
+                    <input type="checkbox" id="filter-only-new" name="onlyNew" />
+                    <label for="filter-only-new">Solo alertas nuevas</label>
+                  </div>
+
+                  <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
+                </form>
+              </search>
+
+              <button type="button" id="btn-ack-all" class="btn btn-ghost btn-sm" hidden>
+                Marcar todas como leídas en SUNAT
+              </button>
+            </div>
+
+            <div
+              tabindex="0"
+              role="region"
+              aria-labelledby="inbox-table-caption"
+              class="table-wrapper"
+            >
+              <table id="notifications-table">
+                <caption id="inbox-table-caption" class="table-caption">
+                  Mensajes y notificaciones centralizadas de los buzones electrónicos SUNAT
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Cliente / RUC</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Fecha SUNAT</th>
+                    <th scope="col">Asunto / Remitente</th>
+                    <th scope="col">Código</th>
+                    <th scope="col">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="notifications-tbody"></tbody>
+              </table>
+            </div>
+
+            <div id="inbox-empty" class="empty-state" hidden>
+              <p class="empty-title">No hay notificaciones para mostrar</p>
+              <p class="empty-text">
+                Registra un cliente y presiona <strong>Revisar todos ahora</strong> para consultar su Buzón Electrónico en Chrome.
+              </p>
+              <button type="button" class="btn btn-primary" id="btn-empty-add-client">
+                + Registrar primer cliente
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL 2: CLIENTES SUNAT -->
+        <div
+          id="panel-clients"
+          role="tabpanel"
+          aria-labelledby="tab-clients"
+          class="tab-panel"
+          hidden
+        >
+          <div class="panel-surface">
+            <div class="toolbar toolbar-between">
+              <p class="panel-note">
+                Las Claves SOL se cifran con <strong>AES-256-GCM</strong> en base de datos local y nunca se envían al navegador.
+              </p>
+              <button type="button" id="btn-clients-add" class="btn btn-primary btn-sm">
+                + Agregar cliente
+              </button>
+            </div>
+
+            <div
+              tabindex="0"
+              role="region"
+              aria-labelledby="clients-table-caption"
+              class="table-wrapper"
+            >
+              <table id="clients-table">
+                <caption id="clients-table-caption" class="table-caption">
+                  Directorio de contribuyentes configurados para monitoreo
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Cliente</th>
+                    <th scope="col">Documento</th>
+                    <th scope="col">Usuario SOL</th>
+                    <th scope="col">Monitoreo</th>
+                    <th scope="col">Último estado</th>
+                    <th scope="col">Alertas nuevas</th>
+                    <th scope="col">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody id="clients-tbody"></tbody>
+              </table>
+            </div>
+
+            <div id="clients-empty" class="empty-state" hidden>
+              <p class="empty-title">Aún no hay clientes registrados</p>
+              <p class="empty-text">
+                Agrega una empresa o contribuyente usando preferentemente un Usuario Secundario SOL con permiso solo de Buzón Electrónico.
+              </p>
+              <button type="button" class="btn btn-primary" id="btn-clients-empty-add">
+                + Registrar cliente
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- PANEL 3: HISTORIAL DE REVISIONES -->
+        <div
+          id="panel-runs"
+          role="tabpanel"
+          aria-labelledby="tab-runs"
+          class="tab-panel"
+          hidden
+        >
+          <div class="panel-surface">
+            <div
+              tabindex="0"
+              role="region"
+              aria-labelledby="runs-table-caption"
+              class="table-wrapper"
+            >
+              <table id="runs-table">
+                <caption id="runs-table-caption" class="table-caption">
+                  Registro de ejecuciones recientes de Chrome por cliente
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Cliente</th>
+                    <th scope="col">Inicio</th>
+                    <th scope="col">Estado</th>
+                    <th scope="col">Mensajes</th>
+                    <th scope="col">Nuevos</th>
+                    <th scope="col">Detalle / Error</th>
+                  </tr>
+                </thead>
+                <tbody id="runs-tbody"></tbody>
+              </table>
+            </div>
+
+            <div id="runs-empty" class="empty-state" hidden>
+              <p class="empty-title">Sin revisiones ejecutadas aún</p>
+              <p class="empty-text">
+                Aquí aparecerá el historial cada vez que el monitor consulte SUNAT en Chrome.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- DIALOG 1: REGISTRAR / ACTUALIZAR CLIENTE -->
+    <dialog id="client-dialog" aria-labelledby="client-dialog-title">
+      <div class="dialog-header">
+        <h2 id="client-dialog-title">Registrar cliente SUNAT</h2>
+        <button
+          type="button"
+          class="btn-icon"
+          id="btn-close-client-dialog"
+          aria-label="Cerrar ventana"
+        >
+          ✕
+        </button>
+      </div>
+
+      <form id="client-form" method="POST" novalidate>
+        <p class="dialog-security-note">
+          Recomendación: crea en SUNAT un <strong>Usuario Secundario</strong> con acceso exclusivo a consulta de Buzón Electrónico.
+        </p>
+
+        <fieldset class="radio-fieldset">
+          <legend>Tipo de acceso SUNAT</legend>
+          <div class="radio-row">
+            <div class="radio-item">
+              <input type="radio" id="mode-ruc" name="loginMode" value="RUC" checked />
+              <label for="mode-ruc">RUC + Usuario SOL</label>
+            </div>
+            <div class="radio-item">
+              <input type="radio" id="mode-dni" name="loginMode" value="DNI" />
+              <label for="mode-dni">DNI (Persona Natural)</label>
+            </div>
+          </div>
+        </fieldset>
+
+        <div class="field">
+          <label for="client-label">
+            Nombre o razón social <span aria-hidden="true">*</span>
+          </label>
+          <span id="label-hint" class="hint">Ejemplo: Comercial Perú SAC</span>
+          <input
+            type="text"
+            id="client-label"
+            name="label"
+            required
+            minlength="2"
+            maxlength="80"
+            autocomplete="organization"
+            aria-describedby="label-hint"
+            data-error="label-error"
+            autofocus
+          />
+          <div id="label-error" class="error-msg">
+            <span role="img" aria-label="Error">⚠</span> Ingresa un nombre o etiqueta de al menos 2 caracteres.
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="client-doc" id="client-doc-label">
+            Número de RUC <span aria-hidden="true">*</span>
+          </label>
+          <span id="doc-hint" class="hint">Exactamente 11 dígitos numéricos.</span>
+          <input
+            type="text"
+            id="client-doc"
+            name="docNumber"
+            inputmode="numeric"
+            required
+            pattern="\d{11}"
+            maxlength="11"
+            autocorrect="off"
+            autocapitalize="none"
+            spellcheck="false"
+            aria-describedby="doc-hint"
+            data-error="doc-error"
+          />
+          <div id="doc-error" class="error-msg">
+            <span role="img" aria-label="Error">⚠</span> <span id="doc-error-text">El RUC debe tener exactamente 11 dígitos numéricos.</span>
+          </div>
+        </div>
+
+        <div class="field" id="sol-user-group">
+          <label for="client-user">
+            Usuario SOL <span aria-hidden="true">*</span>
+          </label>
+          <span id="user-hint" class="hint">Hasta 8 caracteres (se guarda en mayúsculas).</span>
+          <input
+            type="text"
+            id="client-user"
+            name="solUser"
+            required
+            minlength="4"
+            maxlength="8"
+            autocomplete="username"
+            autocorrect="off"
+            autocapitalize="characters"
+            spellcheck="false"
+            aria-describedby="user-hint"
+            data-error="user-error"
+          />
+          <div id="user-error" class="error-msg">
+            <span role="img" aria-label="Error">⚠</span> Ingresa un usuario SOL válido (4 a 8 caracteres).
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="client-password">
+            Clave SOL <span aria-hidden="true">*</span>
+          </label>
+          <span id="password-hint" class="hint">Mínimo 4 caracteres. Se cifra con AES-256-GCM antes de guardarse.</span>
+          <div class="password-row">
+            <input
+              type="password"
+              id="client-password"
+              name="solPassword"
+              required
+              minlength="4"
+              maxlength="32"
+              autocomplete="new-password"
+              aria-describedby="password-hint"
+              data-error="password-error"
+            />
+            <button
+              type="button"
+              id="toggle-sol-password"
+              class="btn btn-secondary btn-sm"
+              aria-pressed="false"
+              aria-label="Mostrar Clave SOL"
+              aria-describedby="toggle-pw-warning"
+            >
+              Mostrar
+            </button>
+          </div>
+          <span id="toggle-pw-warning" class="visually-hidden">
+            Advertencia: esto mostrará la Clave SOL visible en pantalla.
+          </span>
+          <div id="password-error" class="error-msg">
+            <span role="img" aria-label="Error">⚠</span> La Clave SOL debe tener al menos 4 caracteres.
+          </div>
+        </div>
+
+        <div id="client-form-server-error" class="form-alert" role="alert" hidden></div>
+
+        <div class="dialog-actions">
+          <button type="button" id="btn-cancel-client" class="btn btn-secondary">Cancelar</button>
+          <button type="submit" id="btn-save-client" class="btn btn-primary">
+            Guardar cliente cifrado
+          </button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- DIALOG 2: DETALLE DE NOTIFICACIÓN -->
+    <dialog id="detail-dialog" closedby="any" aria-labelledby="detail-dialog-title">
+      <div class="dialog-header">
+        <h2 id="detail-dialog-title">Detalle de notificación</h2>
+        <button
+          type="button"
+          class="btn-icon"
+          id="btn-close-detail-dialog"
+          aria-label="Cerrar detalle"
+          autofocus
+        >
+          ✕
+        </button>
+      </div>
+      <div id="detail-body" class="detail-body"></div>
+      <div class="dialog-actions">
+        <button type="button" id="btn-detail-ack" class="btn btn-primary" hidden>
+          Marcar como leída en SUNAT
+        </button>
+        <form method="dialog">
+          <button value="close" class="btn btn-secondary">Cerrar</button>
+        </form>
+      </div>
+    </dialog>
+
+    <!-- DIALOG 3: CONFIRMACIÓN DE ELIMINACIÓN -->
+    <dialog id="confirm-delete-dialog" aria-labelledby="confirm-delete-title">
+      <h2 id="confirm-delete-title">¿Eliminar cliente?</h2>
+      <p id="confirm-delete-desc" class="confirm-text"></p>
+      <form method="dialog" class="dialog-actions">
+        <button value="cancel" class="btn btn-secondary" autofocus>Cancelar</button>
+        <button value="delete" class="btn btn-danger">Eliminar definitivamente</button>
+      </form>
+    </dialog>
+
+    <!-- Toast visual y región accesible -->
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

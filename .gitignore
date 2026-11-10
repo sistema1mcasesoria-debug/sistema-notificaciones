@@ -1,0 +1,15 @@
+# Dependencias y compilados
+node_modules/
+dist/
+
+# Variables de entorno y secretos (NUNCA subir a Git)
+.env
+.env.*
+!.env.example
+
+# Base de datos local y logs
+data/
+logs/
+*.db
+*.db-wal
+*.db-shm

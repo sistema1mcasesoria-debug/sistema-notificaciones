@@ -1,0 +1,32 @@
+{
+  "name": "sunat-buzon-monitor",
+  "version": "0.1.0",
+  "description": "Sistema de monitoreo centralizado de Buzon Electronico SUNAT con Playwright (Chrome) y credenciales cifradas",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node --no-warnings --watch --import tsx src/server/webServer.ts",
+    "web": "node --no-warnings --watch --import tsx src/server/webServer.ts",
+    "keygen": "node --no-warnings --import tsx src/cli/keygen.ts",
+    "client:add": "node --no-warnings --import tsx src/cli/manageClients.ts add",
+    "client:list": "node --no-warnings --import tsx src/cli/manageClients.ts list",
+    "client:toggle": "node --no-warnings --import tsx src/cli/manageClients.ts toggle",
+    "client:remove": "node --no-warnings --import tsx src/cli/manageClients.ts remove",
+    "check": "node --no-warnings --import tsx src/index.ts --once",
+    "monitor": "node --no-warnings --import tsx src/index.ts",
+    "notifications": "node --no-warnings --import tsx src/cli/manageClients.ts notifications",
+    "test:crypto": "node --no-warnings --import tsx src/security/crypto.test.ts",
+    "test:scraper": "node --no-warnings --import tsx src/scraper/sunatScraper.test.ts",
+    "test:web": "node --no-warnings --import tsx src/server/webServer.test.ts"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "playwright": "^1.56.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}
