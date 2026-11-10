@@ -3,7 +3,9 @@ import path from 'node:path';
 import { chromium, type Browser, type Frame, type Page } from 'playwright';
 import type { AppConfig } from '../config/env.js';
 import type {
+  AttachmentDownloadResult,
   ClientCredentials,
+  DownloadAttachmentTarget,
   ScrapeResult,
   SunatNotificationItem,
 } from './types.js';
@@ -638,6 +640,15 @@ export async function checkSunatMailbox(
         })
         .then(() => 'MFA_WITHOUT_CODE' as const),
       page
+        .waitForSelector(
+          'text=/sesi[oó]n\\s+(?:activa|iniciada|en\\s+uso)|ya\\s+tiene\\s+una\\s+sesi[oó]n|otra\\s+sesi[oó]n|sesi[oó]n\\s+abierta/i',
+          {
+            state: 'visible',
+            timeout: config.navigationTimeoutMs,
+          },
+        )
+        .then(() => 'SESSION_ACTIVE_PROMPT' as const),
+      page
         .waitForSelector('#divMensajeError:not(.hidden)', {
           state: 'visible',
           timeout: config.navigationTimeoutMs,
@@ -650,6 +661,18 @@ export async function checkSunatMailbox(
         })
         .then(() => 'CAPTCHA' as const),
     ]);
+
+    if (outcome === 'SESSION_ACTIVE_PROMPT') {
+      const shot = config.saveDebugArtifacts
+        ? await saveDebugScreenshot(page, credentials.docNumber, 'session_active')
+        : undefined;
+      return {
+        status: 'SESSION_ACTIVE',
+        notifications: [],
+        message: 'Sesión activa en otra máquina: Por favor cierre la sesión en uso para poder sincronizar.',
+        debugScreenshotPath: shot,
+      };
+    }
 
     if (outcome === 'MFA_WITHOUT_CODE') {
       const btnWithoutCode = page.locator('#btnWithOutCode').first();
@@ -671,9 +694,30 @@ export async function checkSunatMailbox(
       const errorText =
         (await page.locator('#spanMensajeError').textContent().catch(() => null))?.trim() ||
         'Credenciales invalidas o acceso rechazado por SUNAT.';
+
+      const isSessionActive =
+        /sesi[oó]n\s+(?:activa|iniciada|en\s+uso)|ya\s+tiene\s+una\s+sesi[oó]n|otra\s+sesi[oó]n|sesi[oó]n\s+abierta/i.test(
+          errorText,
+        );
+
       const shot = config.saveDebugArtifacts
-        ? await saveDebugScreenshot(page, credentials.docNumber, 'auth_error')
+        ? await saveDebugScreenshot(
+            page,
+            credentials.docNumber,
+            isSessionActive ? 'session_active' : 'auth_error',
+          )
         : undefined;
+
+      if (isSessionActive) {
+        return {
+          status: 'SESSION_ACTIVE',
+          notifications: [],
+          message:
+            'Sesión activa en otra máquina: Por favor cierre la sesión en uso para poder sincronizar.',
+          debugScreenshotPath: shot,
+        };
+      }
+
       return {
         status: 'AUTH_ERROR',
         notifications: [],
@@ -872,6 +916,15 @@ export async function markMultipleNotificationsAsReadInSunat(
         })
         .then(() => 'MFA_WITHOUT_CODE' as const),
       page
+        .waitForSelector(
+          'text=/sesi[oó]n\\s+(?:activa|iniciada|en\\s+uso)|ya\\s+tiene\\s+una\\s+sesi[oó]n|otra\\s+sesi[oó]n|sesi[oó]n\\s+abierta/i',
+          {
+            state: 'visible',
+            timeout: config.navigationTimeoutMs,
+          },
+        )
+        .then(() => 'SESSION_ACTIVE' as const),
+      page
         .waitForSelector('#divMensajeError:not(.hidden)', {
           state: 'visible',
           timeout: config.navigationTimeoutMs,
@@ -884,6 +937,10 @@ export async function markMultipleNotificationsAsReadInSunat(
         })
         .then(() => 'CAPTCHA' as const),
     ]);
+
+    if (outcome === 'SESSION_ACTIVE') {
+      throw new Error('Sesión activa en otra máquina: Por favor cierre la sesión en uso para poder sincronizar.');
+    }
 
     if (outcome === 'MFA_WITHOUT_CODE') {
       const btnWithoutCode = page.locator('#btnWithOutCode').first();
@@ -899,6 +956,20 @@ export async function markMultipleNotificationsAsReadInSunat(
           timeout: config.navigationTimeoutMs,
         }),
       ]).catch(() => {});
+    } else if (outcome === 'AUTH_ERROR') {
+      const errorText =
+        (await page.locator('#spanMensajeError').textContent().catch(() => null))?.trim() ||
+        'Credenciales inválidas al intentar ingresar a SUNAT.';
+      if (
+        /sesi[oó]n\s+(?:activa|iniciada|en\s+uso)|ya\s+tiene\s+una\s+sesi[oó]n|otra\s+sesi[oó]n|sesi[oó]n\s+abierta/i.test(
+          errorText,
+        )
+      ) {
+        throw new Error(
+          'Sesión activa en otra máquina: Por favor cierre la sesión en uso para poder sincronizar.',
+        );
+      }
+      throw new Error(errorText);
     } else if (outcome !== 'LOGGED_IN') {
       throw new Error(
         outcome === 'CAPTCHA'
@@ -1021,4 +1092,248 @@ export async function markNotificationAsReadInSunat(
       ? 'Notificación abierta y registrada como leída en el portal de SUNAT.'
       : 'Se registró como leída localmente (no se ubicó en la primera página de SUNAT).',
   };
+}
+
+export async function downloadNotificationAttachmentFromSunat(
+  credentials: ClientCredentials,
+  target: DownloadAttachmentTarget,
+  destinationDir: string,
+  config: AppConfig,
+): Promise<AttachmentDownloadResult> {
+  let browser: Browser | null = null;
+  try {
+    const channel = config.browserChannel || 'chrome';
+    browser = await chromium.launch({
+      channel,
+      headless: config.headless,
+      args: ['--disable-blink-features=AutomationControlled', '--no-sandbox'],
+    });
+
+    const majorVersion = browser.version().split('.')[0] || '131';
+    const context = await browser.newContext({
+      locale: 'es-PE',
+      timezoneId: 'America/Lima',
+      viewport: { width: 1366, height: 768 },
+      acceptDownloads: true,
+      userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
+    });
+
+    await context.addInitScript(() => {
+      Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    });
+
+    const page = await context.newPage();
+    page.setDefaultTimeout(config.navigationTimeoutMs);
+
+    // 1. Iniciar sesión en SUNAT SOL
+    await page.goto(SUNAT_MENU_ENTRY_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('#btnAceptar', { state: 'visible' });
+
+    if (credentials.loginMode === 'RUC') {
+      await page.click('#btnPorRuc');
+      await page.waitForSelector('#txtRuc', { state: 'visible' });
+      await page.fill('#txtRuc', credentials.docNumber);
+      await page.fill('#txtUsuario', credentials.solUser.toUpperCase());
+      await page.fill('#txtContrasena', credentials.solPassword);
+    } else {
+      await page.click('#btnPorDni');
+      await page.waitForSelector('#txtDni', { state: 'visible' });
+      await page.fill('#txtDni', credentials.docNumber);
+      await page.fill('#txtContrasena', credentials.solPassword);
+    }
+
+    await page.click('#btnAceptar');
+
+    const outcome = await Promise.race([
+      page
+        .waitForURL((url) => !url.hostname.includes('api-seguridad.sunat.gob.pe'), {
+          timeout: config.navigationTimeoutMs,
+          waitUntil: 'domcontentloaded',
+        })
+        .then(() => 'LOGGED_IN' as const),
+      page
+        .waitForSelector('#divBuzon, #btnBuzon, [onclick*="buzon" i], a[href*="buzon" i]', {
+          state: 'attached',
+          timeout: config.navigationTimeoutMs,
+        })
+        .then(() => 'LOGGED_IN' as const),
+      page
+        .waitForSelector('#btnWithOutCode', {
+          state: 'visible',
+          timeout: config.navigationTimeoutMs,
+        })
+        .then(() => 'MFA_WITHOUT_CODE' as const),
+      page
+        .waitForSelector(
+          'text=/sesi[oó]n\\s+(?:activa|iniciada|en\\s+uso)|ya\\s+tiene\\s+una\\s+sesi[oó]n|otra\\s+sesi[oó]n|sesi[oó]n\\s+abierta/i',
+          {
+            state: 'visible',
+            timeout: config.navigationTimeoutMs,
+          },
+        )
+        .then(() => 'SESSION_ACTIVE' as const),
+      page
+        .waitForSelector('#divMensajeError:not(.hidden)', {
+          state: 'visible',
+          timeout: config.navigationTimeoutMs,
+        })
+        .then(() => 'AUTH_ERROR' as const),
+      page
+        .waitForSelector('#txtCaptcha', {
+          state: 'visible',
+          timeout: config.navigationTimeoutMs,
+        })
+        .then(() => 'CAPTCHA' as const),
+    ]);
+
+    if (outcome === 'SESSION_ACTIVE') {
+      throw new Error('Sesión activa en otra máquina: Por favor cierre la sesión en uso para poder sincronizar.');
+    }
+
+    if (outcome === 'MFA_WITHOUT_CODE') {
+      const btnWithoutCode = page.locator('#btnWithOutCode').first();
+      await btnWithoutCode.click({ timeout: 5000 }).catch(() => {});
+
+      await Promise.race([
+        page.waitForURL((url) => !url.hostname.includes('api-seguridad.sunat.gob.pe'), {
+          timeout: config.navigationTimeoutMs,
+          waitUntil: 'domcontentloaded',
+        }),
+        page.waitForSelector('#divBuzon, #btnBuzon, [onclick*="buzon" i], a[href*="buzon" i]', {
+          state: 'attached',
+          timeout: config.navigationTimeoutMs,
+        }),
+      ]).catch(() => {});
+    } else if (outcome === 'AUTH_ERROR') {
+      const errorText =
+        (await page.locator('#spanMensajeError').textContent().catch(() => null))?.trim() ||
+        'Credenciales inválidas al intentar ingresar a SUNAT.';
+      if (
+        /sesi[oó]n\s+(?:activa|iniciada|en\s+uso)|ya\s+tiene\s+una\s+sesi[oó]n|otra\s+sesi[oó]n|sesi[oó]n\s+abierta/i.test(
+          errorText,
+        )
+      ) {
+        throw new Error(
+          'Sesión activa en otra máquina: Por favor cierre la sesión en uso para poder sincronizar.',
+        );
+      }
+      throw new Error(errorText);
+    } else if (outcome !== 'LOGGED_IN') {
+      throw new Error(
+        outcome === 'CAPTCHA'
+          ? 'SUNAT solicitó captcha. No se pudo iniciar sesión.'
+          : 'Credenciales inválidas al intentar ingresar a SUNAT.',
+      );
+    }
+
+    // 2. Entrar a Buzón Electrónico
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(2000);
+    await dismissWelcomeModals(page);
+
+    const activePage = await clickBuzonElectronico(page);
+    const isMensaje = /mensaje/i.test(target.notificationType || '');
+    if (isMensaje) {
+      await trySwitchToMensajesTab(activePage);
+    }
+
+    const searchTerms = [
+      target.publishedAt,
+      target.sunatCode,
+      target.subject
+        ? target.subject.replace(/^(?:notificaci[oó]n|asunto|resoluci[oó]n)\s*[:.]?\s*/i, '').slice(0, 32)
+        : null,
+    ].filter((t): t is string => Boolean(t && t.length >= 4));
+
+    let opened = false;
+    for (const frame of activePage.frames()) {
+      for (const term of searchTerms) {
+        try {
+          const candidate = frame
+            .locator('.list-group-item, tbody tr, tr')
+            .filter({ hasText: term })
+            .first();
+
+          if (await candidate.isVisible({ timeout: 1200 })) {
+            const clickTarget =
+              (await candidate.locator('a, button, [onclick], strong').first().isVisible().catch(() => false))
+                ? candidate.locator('a, button, [onclick], strong').first()
+                : candidate;
+            await clickTarget.click({ timeout: 4000 });
+            await activePage.waitForTimeout(2000);
+            await dismissWelcomeModals(activePage).catch(() => {});
+            opened = true;
+            break;
+          }
+        } catch {}
+      }
+      if (opened) break;
+    }
+
+    if (!opened) {
+      return {
+        found: false,
+        message: 'No se encontró la notificación en la lista de SUNAT para descargar su adjunto.',
+      };
+    }
+
+    // 3. Buscar enlace o botón de descarga de archivo (constancia, resolución, anexo, PDF o ZIP)
+    const downloadCandidates = [
+      'a[href*="descarga" i]',
+      'a[href*="constancia" i]',
+      'a[href*="notificacion" i]',
+      'a[href*=".pdf" i]',
+      'a[href*=".zip" i]',
+      'button:has-text("Descargar")',
+      'a:has-text("Descargar")',
+      'a:has-text("Constancia")',
+      '[title*="Descargar" i]',
+      'img[src*="pdf" i]',
+      'img[src*="descarga" i]',
+    ];
+
+    if (!fs.existsSync(destinationDir)) {
+      fs.mkdirSync(destinationDir, { recursive: true });
+    }
+
+    for (const frame of activePage.frames()) {
+      for (const sel of downloadCandidates) {
+        try {
+          const dlBtn = frame.locator(sel).first();
+          if (await dlBtn.isVisible({ timeout: 1000 })) {
+            const [download] = await Promise.all([
+              activePage.waitForEvent('download', { timeout: 15000 }).catch(() => null),
+              dlBtn.click({ timeout: 5000 }),
+            ]);
+
+            if (download) {
+              const originalFilename = download.suggestedFilename() || 'documento.pdf';
+              const cleanCode = (target.sunatCode || 'notif').replace(/[^a-zA-Z0-9_-]/g, '_');
+              const finalFilename = `${cleanCode}_${originalFilename}`;
+              const filePath = path.join(destinationDir, finalFilename);
+              await download.saveAs(filePath);
+
+              await tryLogout(page);
+              return {
+                found: true,
+                filename: finalFilename,
+                filePath,
+                message: 'Archivo adjunto descargado exitosamente de SUNAT.',
+              };
+            }
+          }
+        } catch {}
+      }
+    }
+
+    await tryLogout(page);
+    return {
+      found: false,
+      message: 'La notificación no contiene un archivo adjunto descargable directo.',
+    };
+  } finally {
+    if (browser) {
+      await browser.close().catch(() => undefined);
+    }
+  }
 }

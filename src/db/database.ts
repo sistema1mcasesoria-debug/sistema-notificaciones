@@ -111,6 +111,22 @@ function initializeSchema(db: DatabaseSync): void {
       'v4_sync_read_status_alerts',
     );
   }
+
+  const appliedV5 = db
+    .prepare('SELECT 1 FROM schema_migrations WHERE id = ?')
+    .get('v5_add_attachments_columns');
+
+  if (!appliedV5) {
+    try {
+      db.prepare('ALTER TABLE notifications ADD COLUMN attachment_path TEXT').run();
+    } catch {}
+    try {
+      db.prepare('ALTER TABLE notifications ADD COLUMN attachment_name TEXT').run();
+    } catch {}
+    db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(
+      'v5_add_attachments_columns',
+    );
+  }
 }
 
 export function closeDatabase(): void {

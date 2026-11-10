@@ -39,6 +39,8 @@ export interface StoredNotification {
   isNewAlert: boolean;
   firstSeenAt: string;
   rawRow: Record<string, string>;
+  attachmentPath: string | null;
+  attachmentName: string | null;
 }
 
 export interface CheckRunSummary {
@@ -354,7 +356,9 @@ export class ClientService {
           n.read_status_sunat,
           n.is_new_alert,
           n.raw_row_json,
-          n.first_seen_at
+          n.first_seen_at,
+          n.attachment_path,
+          n.attachment_name
         FROM notifications n
         INNER JOIN clients c ON c.id = n.client_id
         ${whereClause}
@@ -375,6 +379,8 @@ export class ClientService {
       is_new_alert: number;
       raw_row_json: string | null;
       first_seen_at: string;
+      attachment_path: string | null;
+      attachment_name: string | null;
     }>;
 
     return rows.map((r) => {
@@ -401,6 +407,8 @@ export class ClientService {
         isNewAlert: r.is_new_alert === 1,
         firstSeenAt: r.first_seen_at,
         rawRow,
+        attachmentPath: r.attachment_path || null,
+        attachmentName: r.attachment_name || null,
       };
     });
   }
@@ -410,6 +418,13 @@ export class ClientService {
       .prepare('UPDATE notifications SET is_new_alert = 0 WHERE id = ? AND is_new_alert = 1')
       .run(id);
     return Number(result.changes) > 0;
+  }
+
+  saveNotificationAttachment(id: number, attachmentPath: string, attachmentName: string): boolean {
+    const res = this.db
+      .prepare('UPDATE notifications SET attachment_path = ?, attachment_name = ? WHERE id = ?')
+      .run(attachmentPath, attachmentName, id);
+    return Number(res.changes) > 0;
   }
 
   getNotificationById(id: number): StoredNotification | null {
@@ -428,7 +443,9 @@ export class ClientService {
           n.read_status_sunat,
           n.is_new_alert,
           n.raw_row_json,
-          n.first_seen_at
+          n.first_seen_at,
+          n.attachment_path,
+          n.attachment_name
         FROM notifications n
         INNER JOIN clients c ON c.id = n.client_id
         WHERE n.id = ?
@@ -448,6 +465,8 @@ export class ClientService {
           is_new_alert: number;
           raw_row_json: string | null;
           first_seen_at: string;
+          attachment_path: string | null;
+          attachment_name: string | null;
         }
       | undefined;
 
@@ -476,6 +495,8 @@ export class ClientService {
       isNewAlert: row.is_new_alert === 1,
       firstSeenAt: row.first_seen_at,
       rawRow,
+      attachmentPath: row.attachment_path || null,
+      attachmentName: row.attachment_name || null,
     };
   }
 
@@ -508,7 +529,7 @@ export class ClientService {
           (SELECT COUNT(*) FROM clients) AS total_clients,
           (SELECT COUNT(*) FROM clients WHERE active = 1) AS active_clients,
           (SELECT COUNT(*) FROM notifications WHERE is_new_alert = 1) AS unread_alerts,
-          (SELECT COUNT(*) FROM clients WHERE active = 1 AND last_status IN ('AUTH_ERROR', 'CAPTCHA', 'ERROR')) AS error_clients,
+          (SELECT COUNT(*) FROM clients WHERE active = 1 AND last_status IN ('AUTH_ERROR', 'CAPTCHA', 'SESSION_ACTIVE', 'ERROR')) AS error_clients,
           (SELECT MAX(last_checked_at) FROM clients) AS last_checked_at
       `)
       .get() as {

@@ -439,6 +439,7 @@ function createStatusBadge(status) {
   if (status === 'OK') return el('span', 'badge badge-ok', 'OK');
   if (status === 'AUTH_ERROR') return el('span', 'badge badge-error', 'Clave incorrecta');
   if (status === 'CAPTCHA') return el('span', 'badge badge-warn', 'Captcha');
+  if (status === 'SESSION_ACTIVE') return el('span', 'badge badge-urgent', 'Sesión en otra máquina');
   return el('span', 'badge badge-error', 'Error');
 }
 
@@ -487,6 +488,9 @@ function renderNotifications(notifications) {
     const tdSubject = document.createElement('td');
     tdSubject.append(el('span', 'cell-primary', item.subject));
     const subParts = [item.sender, item.notificationType, item.readStatusSunat].filter(Boolean);
+    if (item.attachmentPath) {
+      subParts.push('📎 Adjunto listo');
+    }
     if (subParts.length > 0) {
       tdSubject.append(el('span', 'cell-secondary', subParts.join(' • ')));
     }
@@ -896,6 +900,46 @@ function openNotificationDetail(item) {
     }
     detailBody.append(box);
   }
+
+  // Archivo Adjunto / Constancia SUNAT
+  const attachBox = el('div', 'detail-item detail-item-attachment');
+  attachBox.append(el('span', 'detail-item-label', 'Archivo Adjunto / Constancia SUNAT'));
+
+  if (item.attachmentPath) {
+    const attachWrap = el('div', 'attach-actions');
+    const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir / Descargar (${item.attachmentName || 'PDF'})`);
+    btnView.href = `/api/notifications/${item.id}/attachment`;
+    btnView.target = '_blank';
+    btnView.rel = 'noopener noreferrer';
+    attachWrap.append(btnView);
+    attachBox.append(attachWrap);
+  } else {
+    const attachWrap = el('div', 'attach-actions');
+    const btnDownload = el('button', 'btn btn-secondary btn-sm', '📥 Descargar Adjunto de SUNAT (PDF)');
+    btnDownload.type = 'button';
+    btnDownload.addEventListener('click', async () => {
+      btnDownload.disabled = true;
+      btnDownload.textContent = '⏳ Extrayendo adjunto de SUNAT en segundo plano...';
+      try {
+        const res = await apiJson(`/api/notifications/${item.id}/download-attachment`, {
+          method: 'POST',
+          body: '{}',
+        });
+        showToast(res.message || 'Adjunto descargado correctamente.');
+        item.attachmentPath = res.url;
+        item.attachmentName = res.filename;
+        openNotificationDetail(item);
+        await loadDashboard();
+      } catch (err) {
+        showToast(err.message, true);
+        btnDownload.disabled = false;
+        btnDownload.textContent = '📥 Descargar Adjunto de SUNAT (PDF)';
+      }
+    });
+    attachWrap.append(btnDownload);
+    attachBox.append(attachWrap);
+  }
+  detailBody.append(attachBox);
 
   btnDetailAck.hidden = !item.isNewAlert && item.readStatusSunat === 'Leído';
   detailDialog.showModal();

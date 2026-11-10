@@ -4,6 +4,7 @@ import path from 'node:path';
 import { getConfig, requireEncryptionKey, type AppConfig } from '../config/env.js';
 import { closeDatabase, getDatabase } from '../db/database.js';
 import {
+  downloadNotificationAttachmentFromSunat,
   markMultipleNotificationsAsReadInSunat,
   markNotificationAsReadInSunat,
 } from '../scraper/sunatScraper.js';
@@ -330,6 +331,115 @@ export function createWebServer(
           monitorState.isRunning = false;
           monitorState.progress = null;
         }
+        return;
+      }
+
+      const downloadAttachMatch = pathname.match(/^\/api\/notifications\/(\d+)\/download-attachment$/);
+      if (method === 'POST' && downloadAttachMatch) {
+        if (monitorState.isRunning) {
+          sendJson(res, 409, {
+            error: 'Hay una operación de Chrome en curso. Espera unos segundos a que termine.',
+          });
+          return;
+        }
+
+        const id = Number.parseInt(downloadAttachMatch[1], 10);
+        const notif = clientService.getNotificationById(id);
+        if (!notif) {
+          sendJson(res, 404, { error: `No se encontró la notificación #${id}.` });
+          return;
+        }
+
+        if (notif.attachmentPath && fs.existsSync(notif.attachmentPath)) {
+          sendJson(res, 200, {
+            ok: true,
+            cached: true,
+            filename: notif.attachmentName || path.basename(notif.attachmentPath),
+            url: `/api/notifications/${id}/attachment`,
+            message: 'El archivo adjunto ya se encuentra descargado en el sistema.',
+          });
+          return;
+        }
+
+        const credsList = clientService.getActiveCredentials(notif.clientId);
+        if (credsList.length === 0) {
+          sendJson(res, 400, {
+            error: 'No se encontraron credenciales activas para el cliente de esta notificación.',
+          });
+          return;
+        }
+        const creds = credsList[0];
+
+        monitorState.isRunning = true;
+        monitorState.startedAt = new Date().toISOString();
+        monitorState.progress = {
+          index: 1,
+          total: 1,
+          clientId: notif.clientId,
+          label: `${notif.clientLabel} - Descargando adjunto: ${notif.subject.slice(0, 30)}`,
+          docNumber: notif.docNumber,
+        };
+
+        try {
+          const destDir = path.resolve(process.cwd(), 'data', 'adjuntos', notif.docNumber);
+          const dlRes = await downloadNotificationAttachmentFromSunat(
+            creds,
+            {
+              id: notif.id,
+              subject: notif.subject,
+              sunatCode: notif.sunatCode,
+              publishedAt: notif.publishedAt,
+              notificationType: notif.notificationType,
+            },
+            destDir,
+            config,
+          );
+
+          if (dlRes.found && dlRes.filePath && dlRes.filename) {
+            clientService.saveNotificationAttachment(id, dlRes.filePath, dlRes.filename);
+            sendJson(res, 200, {
+              ok: true,
+              filename: dlRes.filename,
+              url: `/api/notifications/${id}/attachment`,
+              message: dlRes.message || 'Archivo adjunto descargado con éxito.',
+            });
+          } else {
+            sendJson(res, 404, {
+              ok: false,
+              message: dlRes.message || 'La notificación no contiene un archivo adjunto descargable.',
+            });
+          }
+        } catch (dlErr) {
+          const msg = dlErr instanceof Error ? dlErr.message : String(dlErr);
+          sendJson(res, 500, { error: `Error conectando con SUNAT: ${msg}` });
+        } finally {
+          monitorState.isRunning = false;
+          monitorState.progress = null;
+        }
+        return;
+      }
+
+      const getAttachMatch = pathname.match(/^\/api\/notifications\/(\d+)\/attachment$/);
+      if (method === 'GET' && getAttachMatch) {
+        const id = Number.parseInt(getAttachMatch[1], 10);
+        const notif = clientService.getNotificationById(id);
+        if (!notif || !notif.attachmentPath || !fs.existsSync(notif.attachmentPath)) {
+          sendJson(res, 404, { error: 'Archivo adjunto no encontrado en el servidor.' });
+          return;
+        }
+
+        const ext = path.extname(notif.attachmentPath).toLowerCase();
+        let contentType = 'application/octet-stream';
+        if (ext === '.pdf') contentType = 'application/pdf';
+        else if (ext === '.zip') contentType = 'application/zip';
+        else if (ext === '.xml') contentType = 'application/xml';
+
+        const filename = notif.attachmentName || path.basename(notif.attachmentPath);
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Content-Disposition': `inline; filename="${encodeURIComponent(filename)}"`,
+        });
+        fs.createReadStream(notif.attachmentPath).pipe(res);
         return;
       }
 

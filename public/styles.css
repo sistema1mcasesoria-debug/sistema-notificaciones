@@ -1127,6 +1127,19 @@ dialog::backdrop {
   word-break: break-word;
 }
 
+.detail-item-attachment {
+  background: #f8fafc;
+  border: 1px dashed var(--primary);
+}
+
+.attach-actions {
+  margin-block-start: 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
 .confirm-text {
   color: var(--text-muted);
   margin: 0.5rem 0 0;
