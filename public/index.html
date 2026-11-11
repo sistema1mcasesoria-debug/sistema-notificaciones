@@ -154,6 +154,15 @@
                     </select>
                   </div>
 
+                  <div class="filter-field">
+                    <label for="filter-mailbox">Buzón</label>
+                    <select id="filter-mailbox" name="mailboxSource">
+                      <option value="">Todos los buzones</option>
+                      <option value="NOTIFICACIONES">Buzón Notificaciones</option>
+                      <option value="MENSAJES">Buzón Mensajes</option>
+                    </select>
+                  </div>
+
                   <div class="filter-check">
                     <input type="checkbox" id="filter-only-new" name="onlyNew" />
                     <label for="filter-only-new">Solo alertas nuevas</label>
@@ -182,6 +191,7 @@
                   <tr>
                     <th scope="col">Cliente / RUC</th>
                     <th scope="col">Estado</th>
+                    <th scope="col">Buzón</th>
                     <th scope="col">Fecha SUNAT</th>
                     <th scope="col">Asunto / Remitente</th>
                     <th scope="col">Código</th>

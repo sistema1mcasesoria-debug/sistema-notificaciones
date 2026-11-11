@@ -38,6 +38,7 @@ const tabBadgeClients = document.getElementById('tab-badge-clients');
 const filterForm = document.getElementById('filter-form');
 const filterQuery = document.getElementById('filter-query');
 const filterClient = document.getElementById('filter-client');
+const filterMailbox = document.getElementById('filter-mailbox');
 const filterOnlyNew = document.getElementById('filter-only-new');
 
 const notificationsTbody = document.getElementById('notifications-tbody');
@@ -443,6 +444,13 @@ function createStatusBadge(status) {
   return el('span', 'badge badge-error', 'Error');
 }
 
+function createMailboxBadge(mailboxSource) {
+  if (mailboxSource === 'MENSAJES') {
+    return el('span', 'badge badge-mailbox-messages', 'Buzón Mensajes');
+  }
+  return el('span', 'badge badge-mailbox-notifications', 'Buzón Notificaciones');
+}
+
 function renderNotifications(notifications) {
   notificationsTbody.replaceChildren();
   const hasRows = notifications.length > 0;
@@ -477,14 +485,18 @@ function renderNotifications(notifications) {
       tdStatus.append(el('span', 'badge badge-urgent', 'Importante'));
     }
 
-    // Col 3: Fecha SUNAT
+    // Col 3: Buzón de origen (Buzón Notificaciones vs Buzón Mensajes)
+    const tdMailbox = document.createElement('td');
+    tdMailbox.append(createMailboxBadge(item.mailboxSource));
+
+    // Col 4: Fecha SUNAT
     const tdDate = document.createElement('td');
     tdDate.append(el('span', 'cell-primary', item.publishedAt || 'Sin fecha'));
     tdDate.append(
       el('span', 'cell-secondary', `Detectada: ${formatLocalTimestamp(item.firstSeenAt)}`),
     );
 
-    // Col 4: Asunto / Remitente
+    // Col 5: Asunto / Remitente
     const tdSubject = document.createElement('td');
     tdSubject.append(el('span', 'cell-primary', item.subject));
     const subParts = [item.sender, item.notificationType, item.readStatusSunat].filter(Boolean);
@@ -495,11 +507,11 @@ function renderNotifications(notifications) {
       tdSubject.append(el('span', 'cell-secondary', subParts.join(' • ')));
     }
 
-    // Col 5: Código
+    // Col 6: Código
     const tdCode = document.createElement('td');
     tdCode.textContent = item.sunatCode || '—';
 
-    // Col 6: Acciones (Iconos: ojito para ver detalle, check SOLO si está pendiente de revisión)
+    // Col 7: Acciones (Iconos: ojito para ver detalle, check SOLO si está pendiente de revisión)
     const tdActions = document.createElement('td');
     const actionsWrap = el('div', 'row-actions');
 
@@ -523,7 +535,7 @@ function renderNotifications(notifications) {
     }
 
     tdActions.append(actionsWrap);
-    tr.append(th, tdStatus, tdDate, tdSubject, tdCode, tdActions);
+    tr.append(th, tdStatus, tdMailbox, tdDate, tdSubject, tdCode, tdActions);
     notificationsTbody.append(tr);
   }
 }
@@ -648,6 +660,7 @@ async function loadDashboard() {
   const params = new URLSearchParams();
   if (filterQuery.value.trim()) params.set('q', filterQuery.value.trim());
   if (filterClient.value) params.set('clientId', filterClient.value);
+  if (filterMailbox.value) params.set('mailboxSource', filterMailbox.value);
   if (filterOnlyNew.checked) params.set('onlyNew', 'true');
 
   const data = await apiJson(`/api/dashboard?${params.toString()}`);
@@ -875,6 +888,7 @@ function openNotificationDetail(item) {
 
   const fields = [
     ['Cliente', `${item.clientLabel} (${item.docNumber})`],
+    ['Buzón de origen', item.mailboxSource === 'MENSAJES' ? 'Buzón Mensajes' : 'Buzón Notificaciones'],
     ['Fecha SUNAT', item.publishedAt || 'Sin fecha'],
     ['Código / Referencia', item.sunatCode || '—'],
     ['Tipo / Categoría', item.notificationType || '—'],
@@ -1087,6 +1101,10 @@ btnAckAll.addEventListener('click', acknowledgeAll);
 
 filterForm.addEventListener('submit', (e) => {
   e.preventDefault();
+  void loadDashboard();
+});
+
+filterMailbox.addEventListener('change', () => {
   void loadDashboard();
 });
 

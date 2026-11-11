@@ -69,6 +69,7 @@ test('extractNotificationsFromFrame filtra ruido del portal SUNAT y extrae fecha
     assert.equal(res.items[0].publishedAt, '20/09/2024 16:18:15');
     assert.equal(res.items[0].sunatCode, '023-002-2694674');
     assert.equal(res.items[0].notificationType, 'VALORES');
+    assert.equal(res.items[0].mailboxSource, 'NOTIFICACIONES');
     assert.equal(res.items[0].sender, 'SOL');
     assert.equal(res.items[0].subject, 'Notificación de Valor N° 023-002-2694674');
     assert.equal(res.items[0].readStatusSunat, 'No leído');
@@ -124,6 +125,7 @@ test('extractNotificationsFromFrame soporta vista de tabla clásica de respaldo'
     assert.equal(res.items[0].publishedAt, '05/11/2026 09:15');
     assert.equal(res.items[0].subject, 'Comunicado de campaña de actualización RUC');
     assert.equal(res.items[0].notificationType, 'Mensaje SUNAT');
+    assert.equal(res.items[0].mailboxSource, 'MENSAJES');
     assert.equal(res.items[0].readStatusSunat, 'No leído');
   } finally {
     await browser.close();

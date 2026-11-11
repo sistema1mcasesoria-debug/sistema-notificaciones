@@ -127,6 +127,24 @@ function initializeSchema(db: DatabaseSync): void {
       'v5_add_attachments_columns',
     );
   }
+
+  const appliedV6 = db
+    .prepare('SELECT 1 FROM schema_migrations WHERE id = ?')
+    .get('v6_add_mailbox_source_column');
+
+  if (!appliedV6) {
+    try {
+      db.prepare(
+        "ALTER TABLE notifications ADD COLUMN mailbox_source TEXT NOT NULL DEFAULT 'NOTIFICACIONES'",
+      ).run();
+    } catch {}
+    db.prepare(
+      "UPDATE notifications SET mailbox_source = 'MENSAJES' WHERE LOWER(COALESCE(notification_type, '')) LIKE '%mensaje%'",
+    ).run();
+    db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(
+      'v6_add_mailbox_source_column',
+    );
+  }
 }
 
 export function closeDatabase(): void {

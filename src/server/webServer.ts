@@ -170,6 +170,11 @@ export function createWebServer(
         const onlyNew = url.searchParams.get('onlyNew') === 'true';
         const clientIdParam = url.searchParams.get('clientId');
         const clientId = clientIdParam ? Number.parseInt(clientIdParam, 10) : undefined;
+        const mailboxParam = url.searchParams.get('mailboxSource');
+        const mailboxSource =
+          mailboxParam === 'NOTIFICACIONES' || mailboxParam === 'MENSAJES'
+            ? mailboxParam
+            : undefined;
         const query = url.searchParams.get('q') ?? undefined;
 
         sendJson(res, 200, {
@@ -179,6 +184,7 @@ export function createWebServer(
           notifications: clientService.listNotifications({
             onlyNew,
             clientId: clientId && Number.isFinite(clientId) ? clientId : undefined,
+            mailboxSource,
             query,
             limit: 120,
           }),
@@ -199,12 +205,18 @@ export function createWebServer(
         const onlyNew = url.searchParams.get('onlyNew') === 'true';
         const clientIdParam = url.searchParams.get('clientId');
         const clientId = clientIdParam ? Number.parseInt(clientIdParam, 10) : undefined;
+        const mailboxParam = url.searchParams.get('mailboxSource');
+        const mailboxSource =
+          mailboxParam === 'NOTIFICACIONES' || mailboxParam === 'MENSAJES'
+            ? mailboxParam
+            : undefined;
         const query = url.searchParams.get('q') ?? undefined;
 
         sendJson(res, 200, {
           notifications: clientService.listNotifications({
             onlyNew,
             clientId: clientId && Number.isFinite(clientId) ? clientId : undefined,
+            mailboxSource,
             query,
             limit: 120,
           }),
@@ -313,6 +325,7 @@ export function createWebServer(
               sunatCode: notif.sunatCode,
               publishedAt: notif.publishedAt,
               notificationType: notif.notificationType,
+              mailboxSource: notif.mailboxSource,
             },
             config,
           );
@@ -390,6 +403,7 @@ export function createWebServer(
               sunatCode: notif.sunatCode,
               publishedAt: notif.publishedAt,
               notificationType: notif.notificationType,
+              mailboxSource: notif.mailboxSource,
             },
             destDir,
             config,
@@ -507,6 +521,7 @@ export function createWebServer(
                 sunatCode: n.sunatCode,
                 publishedAt: n.publishedAt,
                 notificationType: n.notificationType,
+                mailboxSource: n.mailboxSource,
               }));
 
               try {

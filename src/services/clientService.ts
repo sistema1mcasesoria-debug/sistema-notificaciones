@@ -9,6 +9,7 @@ import type {
   CheckStatus,
   ClientCredentials,
   LoginMode,
+  MailboxSource,
   SunatNotificationItem,
 } from '../scraper/types.js';
 
@@ -34,6 +35,7 @@ export interface StoredNotification {
   subject: string;
   sender: string | null;
   notificationType: string | null;
+  mailboxSource: MailboxSource;
   publishedAt: string | null;
   readStatusSunat: string | null;
   isNewAlert: boolean;
@@ -240,8 +242,14 @@ export class ClientService {
     const insertNotif = this.db.prepare(`
       INSERT OR IGNORE INTO notifications (
         client_id, external_hash, sunat_code, subject, sender,
-        notification_type, published_at, read_status_sunat, is_new_alert, raw_row_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        notification_type, mailbox_source, published_at, read_status_sunat, is_new_alert, raw_row_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+
+    const syncExistingMailboxSource = this.db.prepare(`
+      UPDATE notifications
+      SET mailbox_source = ?
+      WHERE client_id = ? AND external_hash = ? AND mailbox_source != ?
     `);
 
     for (const item of notifications) {
@@ -253,6 +261,7 @@ export class ClientService {
         item.notificationType ?? '',
       ].join('|');
 
+      const mailboxSource = this.resolveMailboxSource(item.mailboxSource, item.notificationType);
       const externalHash = sha256Hex(fingerprintSource);
       const initialIsNewAlert = item.readStatusSunat === 'Leído' ? 0 : 1;
       const res = insertNotif.run(
@@ -262,6 +271,7 @@ export class ClientService {
         item.subject,
         item.sender,
         item.notificationType,
+        mailboxSource,
         item.publishedAt,
         item.readStatusSunat,
         initialIsNewAlert,
@@ -273,6 +283,8 @@ export class ClientService {
           newFound++;
           newItems.push(item);
         }
+      } else {
+        syncExistingMailboxSource.run(mailboxSource, clientId, externalHash, mailboxSource);
       }
     }
 
@@ -309,6 +321,16 @@ export class ClientService {
     };
   }
 
+  private resolveMailboxSource(
+    mailboxSource: string | null | undefined,
+    notificationType: string | null | undefined,
+  ): MailboxSource {
+    if (mailboxSource === 'MENSAJES' || mailboxSource === 'NOTIFICACIONES') {
+      return mailboxSource;
+    }
+    return /mensaje/i.test(notificationType || '') ? 'MENSAJES' : 'NOTIFICACIONES';
+  }
+
   /**
    * Parses SUNAT publication dates (DD/MM/YYYY[ HH:mm[:ss]], DD-MM-YYYY, or ISO)
    * into epoch milliseconds for reliable descending chronological sorting.
@@ -343,11 +365,13 @@ export class ClientService {
   listNotifications(options?: {
     onlyNew?: boolean;
     clientId?: number;
+    mailboxSource?: MailboxSource;
     query?: string;
     limit?: number;
   }): StoredNotification[] {
     const onlyNew = options?.onlyNew ?? false;
     const clientId = options?.clientId;
+    const mailboxSource = options?.mailboxSource;
     const query = options?.query?.trim() ?? '';
     const limit = options?.limit ?? 100;
 
@@ -360,6 +384,10 @@ export class ClientService {
     if (clientId && Number.isFinite(clientId)) {
       conditions.push('n.client_id = ?');
       params.push(clientId);
+    }
+    if (mailboxSource === 'NOTIFICACIONES' || mailboxSource === 'MENSAJES') {
+      conditions.push('n.mailbox_source = ?');
+      params.push(mailboxSource);
     }
     if (query) {
       conditions.push(
@@ -382,6 +410,7 @@ export class ClientService {
           n.subject,
           n.sender,
           n.notification_type,
+          n.mailbox_source,
           n.published_at,
           n.read_status_sunat,
           n.is_new_alert,
@@ -403,6 +432,7 @@ export class ClientService {
       subject: string;
       sender: string | null;
       notification_type: string | null;
+      mailbox_source: string | null;
       published_at: string | null;
       read_status_sunat: string | null;
       is_new_alert: number;
@@ -431,6 +461,7 @@ export class ClientService {
         subject: r.subject,
         sender: r.sender,
         notificationType: r.notification_type,
+        mailboxSource: this.resolveMailboxSource(r.mailbox_source, r.notification_type),
         publishedAt: r.published_at,
         readStatusSunat: r.read_status_sunat,
         isNewAlert: r.is_new_alert === 1,
@@ -487,6 +518,7 @@ export class ClientService {
           n.subject,
           n.sender,
           n.notification_type,
+          n.mailbox_source,
           n.published_at,
           n.read_status_sunat,
           n.is_new_alert,
@@ -508,6 +540,7 @@ export class ClientService {
           subject: string;
           sender: string | null;
           notification_type: string | null;
+          mailbox_source: string | null;
           published_at: string | null;
           read_status_sunat: string | null;
           is_new_alert: number;
@@ -538,6 +571,7 @@ export class ClientService {
       subject: row.subject,
       sender: row.sender,
       notificationType: row.notification_type,
+      mailboxSource: this.resolveMailboxSource(row.mailbox_source, row.notification_type),
       publishedAt: row.published_at,
       readStatusSunat: row.read_status_sunat,
       isNewAlert: row.is_new_alert === 1,

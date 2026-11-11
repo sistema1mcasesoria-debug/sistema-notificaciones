@@ -6,6 +6,7 @@ import type {
   AttachmentDownloadResult,
   ClientCredentials,
   DownloadAttachmentTarget,
+  MailboxSource,
   ScrapeResult,
   SunatNotificationItem,
 } from './types.js';
@@ -173,10 +174,13 @@ interface FrameExtractionResult {
 export async function extractNotificationsFromFrame(
   frame: Frame,
   defaultCategory: string | null = null,
+  mailboxSource?: MailboxSource,
 ): Promise<FrameExtractionResult> {
+  const resolvedSource: MailboxSource =
+    mailboxSource ?? (/mensaje/i.test(defaultCategory || '') ? 'MENSAJES' : 'NOTIFICACIONES');
   // Nota: evitar `const fn = () => ...` o `function fn()` dentro de `frame.evaluate`,
   // ya que `tsx` (esbuild keepNames) inyecta `__name(...)` que no existe en el DOM del navegador.
-  return frame.evaluate((fallbackCategory) => {
+  const result = await frame.evaluate((fallbackCategory) => {
     const DATE_REGEX =
       /((?:0[1-9]|[12]\d|3[01])\/(?:0[1-9]|1[0-2])\/(?:19|20)\d{2}(?:\s+(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?)?)/;
     const SIDEBAR_NOISE_REGEX =
@@ -514,6 +518,14 @@ export async function extractNotificationsFromFrame(
       items: extracted,
     };
   }, defaultCategory);
+
+  return {
+    ...result,
+    items: result.items.map((item) => ({
+      ...item,
+      mailboxSource: resolvedSource,
+    })),
+  };
 }
 
 async function trySwitchToMensajesTab(activePage: Page): Promise<boolean> {
@@ -751,14 +763,17 @@ export async function checkSunatMailbox(
     let mailboxViewDetected = false;
     let explicitlyEmptyDetected = false;
 
-    const collectFromCurrentFrames = async (defaultCategory: string) => {
+    const collectFromCurrentFrames = async (
+      defaultCategory: string,
+      mailboxSource: MailboxSource,
+    ) => {
       for (const frame of activePage.frames()) {
         try {
-          const res = await extractNotificationsFromFrame(frame, defaultCategory);
+          const res = await extractNotificationsFromFrame(frame, defaultCategory, mailboxSource);
           if (res.foundMailboxView) mailboxViewDetected = true;
           if (res.isExplicitlyEmpty) explicitlyEmptyDetected = true;
           for (const item of res.items) {
-            const key = `${item.publishedAt ?? ''}|${item.subject}`;
+            const key = `${mailboxSource}|${item.publishedAt ?? ''}|${item.subject}`;
             if (!seenKeys.has(key)) {
               seenKeys.add(key);
               allItems.push(item);
@@ -770,12 +785,12 @@ export async function checkSunatMailbox(
       }
     };
 
-    await collectFromCurrentFrames('Notificación SUNAT');
+    await collectFromCurrentFrames('Notificación SUNAT', 'NOTIFICACIONES');
 
     // Si existe pestana "Buzon Mensajes", revisar tambien mensajeria general
     const switchedToMensajes = await trySwitchToMensajesTab(activePage);
     if (switchedToMensajes) {
-      await collectFromCurrentFrames('Mensaje SUNAT');
+      await collectFromCurrentFrames('Mensaje SUNAT', 'MENSAJES');
     }
 
     if (!mailboxViewDetected && allItems.length === 0) {
@@ -834,6 +849,7 @@ export interface MarkAsReadTarget {
   sunatCode?: string | null;
   publishedAt?: string | null;
   notificationType?: string | null;
+  mailboxSource?: MailboxSource;
 }
 
 export interface MarkAsReadResult {
@@ -1014,7 +1030,8 @@ export async function markMultipleNotificationsAsReadInSunat(
       const target = targets[i];
       onProgress?.(i + 1, targets.length, target);
 
-      const isMensaje = /mensaje/i.test(target.notificationType || '');
+      const isMensaje =
+        target.mailboxSource === 'MENSAJES' || /mensaje/i.test(target.notificationType || '');
       await switchToTab(isMensaje ? 'MENSAJES' : 'NOTIFICACIONES');
 
       const searchTerms = [
@@ -1232,7 +1249,8 @@ export async function downloadNotificationAttachmentFromSunat(
     await dismissWelcomeModals(page);
 
     const activePage = await clickBuzonElectronico(page);
-    const isMensaje = /mensaje/i.test(target.notificationType || '');
+    const isMensaje =
+      target.mailboxSource === 'MENSAJES' || /mensaje/i.test(target.notificationType || '');
     if (isMensaje) {
       await trySwitchToMensajesTab(activePage);
     }

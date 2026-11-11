@@ -2,6 +2,8 @@ export type LoginMode = 'RUC' | 'DNI';
 
 export type CheckStatus = 'OK' | 'AUTH_ERROR' | 'CAPTCHA' | 'SESSION_ACTIVE' | 'ERROR';
 
+export type MailboxSource = 'NOTIFICACIONES' | 'MENSAJES';
+
 export interface ClientCredentials {
   clientId: number;
   label: string;
@@ -16,6 +18,7 @@ export interface SunatNotificationItem {
   subject: string;
   sender: string | null;
   notificationType: string | null;
+  mailboxSource?: MailboxSource;
   publishedAt: string | null;
   readStatusSunat: string | null;
   rawRow: Record<string, string>;
@@ -34,6 +37,7 @@ export interface DownloadAttachmentTarget {
   sunatCode: string | null;
   publishedAt: string | null;
   notificationType: string | null;
+  mailboxSource?: MailboxSource;
 }
 
 export interface AttachmentDownloadResult {

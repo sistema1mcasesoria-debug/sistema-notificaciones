@@ -169,9 +169,20 @@ test('API REST, seguridad, indicador Cargando y panel web en Chrome funcionan co
           subject: 'Resolucion de Ejecucion Coactiva de prueba',
           sender: 'Intendencia Lima',
           notificationType: 'Resolucion',
+          mailboxSource: 'NOTIFICACIONES',
           publishedAt: '10/11/2026 08:30',
           readStatusSunat: 'No leido',
           rawRow: { Nro: 'RES-2026-991', Asunto: 'Resolucion de Ejecucion Coactiva de prueba' },
+        },
+        {
+          sunatCode: 'MSG-2026-002',
+          subject: 'Aviso informativo de Buzon Mensajes',
+          sender: 'SUNAT',
+          notificationType: 'Mensaje SUNAT',
+          mailboxSource: 'MENSAJES',
+          publishedAt: '09/11/2026 11:00',
+          readStatusSunat: 'Leído',
+          rawRow: { Asunto: 'Aviso informativo de Buzon Mensajes' },
         },
       ],
     });
@@ -182,10 +193,20 @@ test('API REST, seguridad, indicador Cargando y panel web en Chrome funcionan co
     assert.ok(!dashText.includes('SuperSecretPassword!'));
     const dashJson = JSON.parse(dashText) as {
       stats: { unreadAlerts: number };
-      notifications: Array<{ id: number }>;
+      notifications: Array<{ id: number; mailboxSource: string }>;
     };
     assert.equal(dashJson.stats.unreadAlerts, 1);
-    assert.equal(dashJson.notifications.length, 1);
+    assert.equal(dashJson.notifications.length, 2);
+    assert.equal(dashJson.notifications[0].mailboxSource, 'NOTIFICACIONES');
+    assert.equal(dashJson.notifications[1].mailboxSource, 'MENSAJES');
+
+    const onlyMsgRes = await fetch(`${baseUrl}/api/notifications?mailboxSource=MENSAJES`);
+    assert.equal(onlyMsgRes.status, 200);
+    const onlyMsgJson = (await onlyMsgRes.json()) as {
+      notifications: Array<{ id: number; mailboxSource: string }>;
+    };
+    assert.equal(onlyMsgJson.notifications.length, 1);
+    assert.equal(onlyMsgJson.notifications[0].mailboxSource, 'MENSAJES');
 
     // 3. Prueba en Chrome real (desktop y movil)
     const browser = await chromium.launch({ channel: 'chrome', headless: true });
@@ -201,6 +222,20 @@ test('API REST, seguridad, indicador Cargando y panel web en Chrome funcionan co
       assert.equal(await page.locator('#kpi-unread').textContent(), '1');
       assert.ok(await page.locator('#notifications-tbody tr').first().isVisible());
       assert.ok(await page.locator('.badge-urgent').first().isVisible());
+      assert.ok(await page.locator('.badge-mailbox-notifications').first().isVisible());
+      assert.ok(await page.locator('.badge-mailbox-messages').first().isVisible());
+
+      // Verificar filtro por buzon de origen
+      await page.selectOption('#filter-mailbox', 'MENSAJES');
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('#notifications-tbody tr').count(), 1);
+      assert.equal(
+        await page.locator('#notifications-tbody .badge-mailbox-messages').textContent(),
+        'Buzón Mensajes',
+      );
+      await page.selectOption('#filter-mailbox', '');
+      await page.waitForTimeout(300);
+      assert.equal(await page.locator('#notifications-tbody tr').count(), 2);
 
       // Interceptar llamada a /api/notifications/*/mark-read-sunat para simular éxito sin login real a SUNAT
       await page.route('**/api/notifications/*/mark-read-sunat', async (route) => {
