@@ -309,6 +309,37 @@ export class ClientService {
     };
   }
 
+  /**
+   * Parses SUNAT publication dates (DD/MM/YYYY[ HH:mm[:ss]], DD-MM-YYYY, or ISO)
+   * into epoch milliseconds for reliable descending chronological sorting.
+   */
+  private parseSunatDateMs(value: string | null): number {
+    if (!value) {
+      return 0;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return 0;
+    }
+
+    const dmyMatch = trimmed.match(
+      /^(\d{1,2})[/-](\d{1,2})[/-](\d{4})(?:[\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/,
+    );
+    if (dmyMatch) {
+      const day = Number(dmyMatch[1]);
+      const month = Number(dmyMatch[2]);
+      const year = Number(dmyMatch[3]);
+      const hour = Number(dmyMatch[4] ?? 0);
+      const minute = Number(dmyMatch[5] ?? 0);
+      const second = Number(dmyMatch[6] ?? 0);
+      return Date.UTC(year, month - 1, day, hour, minute, second);
+    }
+
+    const parsed = Date.parse(trimmed);
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
   listNotifications(options?: {
     onlyNew?: boolean;
     clientId?: number;
@@ -339,7 +370,6 @@ export class ClientService {
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    params.push(limit);
 
     const rows = this.db
       .prepare(`
@@ -362,8 +392,7 @@ export class ClientService {
         FROM notifications n
         INNER JOIN clients c ON c.id = n.client_id
         ${whereClause}
-        ORDER BY n.is_new_alert DESC, n.first_seen_at DESC, n.id DESC
-        LIMIT ?
+        ORDER BY n.first_seen_at DESC, n.id ASC
       `)
       .all(...params) as Array<{
       id: number;
@@ -383,7 +412,7 @@ export class ClientService {
       attachment_name: string | null;
     }>;
 
-    return rows.map((r) => {
+    const notifications = rows.map((r) => {
       let rawRow: Record<string, string> = {};
       if (r.raw_row_json) {
         try {
@@ -411,6 +440,25 @@ export class ClientService {
         attachmentName: r.attachment_name || null,
       };
     });
+
+    notifications.sort((a, b) => {
+      const dateDiff = this.parseSunatDateMs(b.publishedAt) - this.parseSunatDateMs(a.publishedAt);
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+
+      const seenA = Date.parse(a.firstSeenAt);
+      const seenB = Date.parse(b.firstSeenAt);
+      const seenDiff = (Number.isFinite(seenB) ? seenB : 0) - (Number.isFinite(seenA) ? seenA : 0);
+      if (seenDiff !== 0) {
+        return seenDiff;
+      }
+
+      // Preserve SUNAT's listing order (lower id first) when timestamps match
+      return a.id - b.id;
+    });
+
+    return limit > 0 ? notifications.slice(0, limit) : notifications;
   }
 
   markNotificationAsReviewed(id: number): boolean {

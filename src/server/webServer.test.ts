@@ -72,6 +72,55 @@ test('migraciones v2 y v3 limpian filas heredadas sin fecha y conservan notifica
   }
 });
 
+test('listNotifications ordena estrictamente de fecha mas reciente a mas antigua (descendente)', () => {
+  const tmpDb = path.join(os.tmpdir(), `sunat_order_test_${Date.now()}.db`);
+  const key = generateEncryptionKeyHex();
+
+  try {
+    const db = getDatabase(tmpDb);
+    const svc = new ClientService(db, key);
+    const clientId = svc.addClient({
+      label: 'Cliente Orden',
+      loginMode: 'RUC',
+      docNumber: '20123456789',
+      solUser: 'USER',
+      solPassword: 'PASS',
+    });
+
+    // Insertar en orden desordenado y con distinto is_new_alert / mes
+    db.prepare(`
+      INSERT INTO notifications (client_id, external_hash, subject, published_at, read_status_sunat, is_new_alert, first_seen_at)
+      VALUES
+        (?, 'h_09', 'Notif dia 09', '09/11/2026 10:00:00', 'Leído', 0, '2026-11-11 09:00:00'),
+        (?, 'h_11', 'Notif dia 11', '11/11/2026 08:15:00', 'Leído', 0, '2026-11-11 09:00:00'),
+        (?, 'h_08', 'Notif dia 08', '08/11/2026 17:30:00', 'Pendiente', 1, '2026-11-11 09:00:00'),
+        (?, 'h_10', 'Notif dia 10', '10/11/2026 14:20:00', 'No leído', 1, '2026-11-11 09:00:00'),
+        (?, 'h_sep', 'Notif septiembre', '30/09/2026 11:00:00', 'Leído', 0, '2026-11-11 09:00:00')
+    `).run(clientId, clientId, clientId, clientId, clientId);
+
+    const ordered = svc.listNotifications({ clientId });
+    assert.deepEqual(
+      ordered.map((n) => n.publishedAt),
+      [
+        '11/11/2026 08:15:00',
+        '10/11/2026 14:20:00',
+        '09/11/2026 10:00:00',
+        '08/11/2026 17:30:00',
+        '30/09/2026 11:00:00',
+      ],
+    );
+
+    const topTwo = svc.listNotifications({ clientId, limit: 2 });
+    assert.deepEqual(
+      topTwo.map((n) => n.publishedAt),
+      ['11/11/2026 08:15:00', '10/11/2026 14:20:00'],
+    );
+  } finally {
+    closeDatabase();
+    fs.rmSync(tmpDb, { force: true });
+  }
+});
+
 test('API REST, seguridad, indicador Cargando y panel web en Chrome funcionan correctamente', async () => {
   const tmpDb = path.join(os.tmpdir(), `sunat_web_test_${Date.now()}.db`);
   const key = generateEncryptionKeyHex();
