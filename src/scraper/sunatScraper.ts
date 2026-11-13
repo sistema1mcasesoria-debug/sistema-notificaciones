@@ -188,7 +188,7 @@ export async function extractNotificationsFromFrame(
     const PART_NOISE_REGEX =
       /^(?:personas|empresas|operador de comercio exterior|buz[oó]n notificaciones|buz[oó]n mensajes(?:\s*\(\d+\))?|anterior|siguiente|buscar|todos|le[ií]dos|no le[ií]dos)$/i;
     const FORM_NOISE_REGEX =
-      /monto a pagar:|etapa documento:|nro documento:|fecha emisi[oó]n:|nro exp\. coactivo:|campo monto a pagar es editable/i;
+      /monto a pagar:|etapa documento:|nro documento:|fecha emisi[oó]n:|nro exp\. coactivo:|campo monto a pagar es editable|estimado contribuyente|mediante la presente le remitimos/i;
 
     const bodyText = (document.body?.innerText || '').replace(/\s+/g, ' ').trim();
     const url = window.location.href;
@@ -1255,12 +1255,28 @@ export async function downloadNotificationAttachmentFromSunat(
       await trySwitchToMensajesTab(activePage);
     }
 
+    // 1. Identificar y ordenar términos de búsqueda priorizando Código y Asunto (nunca la fecha sola de primero)
+    const rawSubject = (target.subject || '')
+      .replace(/^(?:notificaci[oó]n|asunto|resoluci[oó]n)\s*[:.]?\s*/i, '')
+      .trim();
+
+    // Extraer frases clave si el asunto contiene ruido o texto largo
+    const keyPhrases: string[] = [];
+    if (/comprobantes.*puestos\s+a\s+disposici[oó]n|puesta\s+a\s+disposici[oó]n/i.test(rawSubject)) {
+      keyPhrases.push('Puesta a disposición');
+    } else if (/reporte\s+resumen/i.test(rawSubject)) {
+      keyPhrases.push('Reporte Resumen');
+    } else if (/plataforma\s+de\s+confirmaci[oó]n/i.test(rawSubject)) {
+      keyPhrases.push('Plataforma de confirmación');
+    }
+
+    const cleanSubject = rawSubject.slice(0, 32).trim();
+
     const searchTerms = [
-      target.publishedAt,
       target.sunatCode,
-      target.subject
-        ? target.subject.replace(/^(?:notificaci[oó]n|asunto|resoluci[oó]n)\s*[:.]?\s*/i, '').slice(0, 32)
-        : null,
+      ...keyPhrases,
+      cleanSubject.length >= 4 ? cleanSubject : null,
+      target.publishedAt,
     ].filter((t): t is string => Boolean(t && t.length >= 4));
 
     let opened = false;
@@ -1281,6 +1297,7 @@ export async function downloadNotificationAttachmentFromSunat(
             await activePage.waitForTimeout(2000);
             await dismissWelcomeModals(activePage).catch(() => {});
             opened = true;
+            await saveDebugScreenshot(activePage, credentials.docNumber, 'download_opened').catch(() => '');
             break;
           }
         } catch {}
@@ -1289,23 +1306,63 @@ export async function downloadNotificationAttachmentFromSunat(
     }
 
     if (!opened) {
+      await saveDebugScreenshot(activePage, credentials.docNumber, 'download_not_opened').catch(() => '');
       return {
         found: false,
         message: 'No se encontró la notificación en la lista de SUNAT para descargar su adjunto.',
       };
     }
 
-    // 3. Buscar enlace o botón de descarga de archivo (constancia, resolución, anexo, PDF o ZIP)
+    // Volcar elementos interactivos visibles para diagnóstico
+    try {
+      const allFrameElements: any[] = [];
+      for (let i = 0; i < activePage.frames().length; i++) {
+        const f = activePage.frames()[i];
+        const els = await f.evaluate(() => {
+          return Array.from(document.querySelectorAll('a, button, [onclick], img, embed, object, [href]')).map((el) => ({
+            tag: el.tagName,
+            text: (el.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 100),
+            href: el.getAttribute('href'),
+            onclick: el.getAttribute('onclick'),
+            src: el.getAttribute('src'),
+            id: el.id,
+            cls: el.className,
+          }));
+        });
+        allFrameElements.push({ frameIndex: i, name: f.name(), url: f.url(), elements: els });
+      }
+      fs.writeFileSync(
+        path.join(logsDir(), `${credentials.docNumber}_download_elements.json`),
+        JSON.stringify(allFrameElements, null, 2),
+        'utf8',
+      );
+    } catch {}
+
+    // 3. Buscar enlace o botón de descarga de archivo (constancia, resolución, anexo, PDF, TXT, ZIP, etc.)
     const downloadCandidates = [
-      'a[href*="descarga" i]',
-      'a[href*="constancia" i]',
-      'a[href*="notificacion" i]',
-      'a[href*=".pdf" i]',
+      'a[href*="bajarArchivo" i]',
+      'a[href*="bajar" i]:not([href*="MenuInternet"]):not([href*="itmenu"])',
+      'a[href*=".txt" i]',
       'a[href*=".zip" i]',
-      'button:has-text("Descargar")',
-      'a:has-text("Descargar")',
+      'a[href*=".xlsx" i]',
+      'a[href*=".xls" i]',
+      'a[href*=".xml" i]',
+      'a[href*=".pdf" i]',
+      'a#btnPaso03',
+      'button#btnPaso03',
       'a:has-text("Constancia")',
+      'button:has-text("Constancia")',
+      'a:has-text("Descargar")',
+      'button:has-text("Descargar")',
+      'a:has-text("Adjunto")',
+      'button:has-text("Adjunto")',
+      'a[href*="descarga" i]:not([href*="MenuInternet"]):not([href*="itmenu"])',
+      'a[href*="constancia" i]',
+      '[onclick*="bajarArchivo" i]',
+      '[onclick*="descarga" i]',
+      '[onclick*="adjunto" i]',
       '[title*="Descargar" i]',
+      '[title*="Adjunto" i]',
       'img[src*="pdf" i]',
       'img[src*="descarga" i]',
     ];
@@ -1319,13 +1376,19 @@ export async function downloadNotificationAttachmentFromSunat(
         try {
           const dlBtn = frame.locator(sel).first();
           if (await dlBtn.isVisible({ timeout: 1000 })) {
+            const href = await dlBtn.getAttribute('href');
+
+            // Intento 1: clic con escucha de evento download
             const [download] = await Promise.all([
-              activePage.waitForEvent('download', { timeout: 15000 }).catch(() => null),
-              dlBtn.click({ timeout: 5000 }),
+              activePage.waitForEvent('download', { timeout: 8000 }).catch(() => null),
+              dlBtn.click({ timeout: 4000 }).catch(() => {}),
             ]);
 
             if (download) {
-              const originalFilename = download.suggestedFilename() || 'documento.pdf';
+              let originalFilename = download.suggestedFilename() || 'documento.pdf';
+              if (originalFilename.toLowerCase().endsWith('.txt.pdf')) {
+                originalFilename = originalFilename.replace(/\.txt\.pdf$/i, '.txt');
+              }
               const cleanCode = (target.sunatCode || 'notif').replace(/[^a-zA-Z0-9_-]/g, '_');
               const finalFilename = `${cleanCode}_${originalFilename}`;
               const filePath = path.join(destinationDir, finalFilename);
@@ -1339,11 +1402,57 @@ export async function downloadNotificationAttachmentFromSunat(
                 message: 'Archivo adjunto descargado exitosamente de SUNAT.',
               };
             }
+
+            // Intento 2: si no disparó evento download pero tiene URL directa válida, descargar vía contexto
+            if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+              try {
+                const fullUrl = href.startsWith('http') ? href : new URL(href, frame.url()).toString();
+                const resp = await activePage.context().request.get(fullUrl);
+                if (resp.ok()) {
+                  const body = await resp.body();
+                  if (body.length > 0) {
+                    const contentDisp = resp.headers()['content-disposition'] || '';
+                    const contentType = resp.headers()['content-type'] || '';
+                    const fnMatch = contentDisp.match(/filename=["']?([^"';]+)["']?/i);
+                    let fn = fnMatch ? fnMatch[1].trim() : '';
+                    if (!fn) {
+                      const linkText = (await dlBtn.textContent().catch(() => ''))?.trim() || '';
+                      if (/\.[a-zA-Z0-9]{2,4}$/.test(linkText)) {
+                        fn = linkText;
+                      } else {
+                        const ext = contentType.includes('pdf')
+                          ? '.pdf'
+                          : contentType.includes('zip')
+                            ? '.zip'
+                            : contentType.includes('text')
+                              ? '.txt'
+                              : '.bin';
+                        fn = `archivo_${Date.now()}${ext}`;
+                      }
+                    }
+
+                    const cleanCode = (target.sunatCode || 'notif').replace(/[^a-zA-Z0-9_-]/g, '_');
+                    const finalFilename = `${cleanCode}_${fn.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+                    const filePath = path.join(destinationDir, finalFilename);
+                    fs.writeFileSync(filePath, body);
+
+                    await tryLogout(page);
+                    return {
+                      found: true,
+                      filename: finalFilename,
+                      filePath,
+                      message: 'Archivo adjunto descargado exitosamente de SUNAT.',
+                    };
+                  }
+                }
+              } catch {}
+            }
           }
         } catch {}
       }
     }
 
+    await saveDebugScreenshot(activePage, credentials.docNumber, 'download_no_attach').catch(() => '');
     await tryLogout(page);
     return {
       found: false,

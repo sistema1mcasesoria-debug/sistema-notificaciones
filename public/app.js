@@ -921,7 +921,7 @@ function openNotificationDetail(item) {
 
   if (item.attachmentPath) {
     const attachWrap = el('div', 'attach-actions');
-    const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir / Descargar (${item.attachmentName || 'PDF'})`);
+    const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir / Descargar (${item.attachmentName || 'Archivo'})`);
     btnView.href = `/api/notifications/${item.id}/attachment`;
     btnView.target = '_blank';
     btnView.rel = 'noopener noreferrer';
@@ -929,7 +929,7 @@ function openNotificationDetail(item) {
     attachBox.append(attachWrap);
   } else {
     const attachWrap = el('div', 'attach-actions');
-    const btnDownload = el('button', 'btn btn-secondary btn-sm', '📥 Descargar Adjunto de SUNAT (PDF)');
+    const btnDownload = el('button', 'btn btn-secondary btn-sm', '📥 Descargar Adjunto de SUNAT');
     btnDownload.type = 'button';
     btnDownload.addEventListener('click', async () => {
       btnDownload.disabled = true;
@@ -947,7 +947,7 @@ function openNotificationDetail(item) {
       } catch (err) {
         showToast(err.message, true);
         btnDownload.disabled = false;
-        btnDownload.textContent = '📥 Descargar Adjunto de SUNAT (PDF)';
+        btnDownload.textContent = '📥 Descargar Adjunto de SUNAT';
       }
     });
     attachWrap.append(btnDownload);

@@ -447,6 +447,11 @@ export function createWebServer(
         if (ext === '.pdf') contentType = 'application/pdf';
         else if (ext === '.zip') contentType = 'application/zip';
         else if (ext === '.xml') contentType = 'application/xml';
+        else if (ext === '.txt') contentType = 'text/plain; charset=utf-8';
+        else if (ext === '.xlsx') {
+          contentType =
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        } else if (ext === '.xls') contentType = 'application/vnd.ms-excel';
 
         const filename = notif.attachmentName || path.basename(notif.attachmentPath);
         res.writeHead(200, {
