@@ -919,7 +919,7 @@ function openNotificationDetail(item) {
   const attachBox = el('div', 'detail-item detail-item-attachment');
   attachBox.append(el('span', 'detail-item-label', 'Archivo Adjunto / Constancia SUNAT'));
 
-  if (item.attachmentPath) {
+  if (item.attachmentPath && item.attachmentPath !== 'NONE' && item.attachmentName !== 'SIN_ADJUNTO') {
     const attachWrap = el('div', 'attach-actions');
     const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir / Descargar (${item.attachmentName || 'Archivo'})`);
     btnView.href = `/api/notifications/${item.id}/attachment`;
@@ -927,21 +927,34 @@ function openNotificationDetail(item) {
     btnView.rel = 'noopener noreferrer';
     attachWrap.append(btnView);
     attachBox.append(attachWrap);
+  } else if (item.attachmentName === 'SIN_ADJUNTO' || item.attachmentPath === 'NONE') {
+    const infoText = el('div', 'alert-info-box', 'ℹ️ Esta comunicación es únicamente informativa y no contiene archivo adjunto en el portal de SUNAT.');
+    infoText.style.padding = '8px 12px';
+    infoText.style.background = '#f0f4f8';
+    infoText.style.borderRadius = '6px';
+    infoText.style.fontSize = '13px';
+    infoText.style.color = '#4a5568';
+    attachBox.append(infoText);
   } else {
     const attachWrap = el('div', 'attach-actions');
     const btnDownload = el('button', 'btn btn-secondary btn-sm', '📥 Descargar Adjunto de SUNAT');
     btnDownload.type = 'button';
     btnDownload.addEventListener('click', async () => {
       btnDownload.disabled = true;
-      btnDownload.textContent = '⏳ Extrayendo adjunto de SUNAT en segundo plano...';
+      btnDownload.textContent = '⏳ Verificando adjunto en SUNAT en segundo plano...';
       try {
         const res = await apiJson(`/api/notifications/${item.id}/download-attachment`, {
           method: 'POST',
           body: '{}',
         });
-        showToast(res.message || 'Adjunto descargado correctamente.');
-        item.attachmentPath = res.url;
-        item.attachmentName = res.filename;
+        showToast(res.message || 'Procesado correctamente.');
+        if (res.hasAttachment && res.url) {
+          item.attachmentPath = res.url;
+          item.attachmentName = res.filename;
+        } else {
+          item.attachmentPath = 'NONE';
+          item.attachmentName = 'SIN_ADJUNTO';
+        }
         openNotificationDetail(item);
         await loadDashboard();
       } catch (err) {

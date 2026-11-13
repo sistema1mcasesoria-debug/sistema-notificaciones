@@ -363,13 +363,24 @@ export function createWebServer(
           return;
         }
 
-        if (notif.attachmentPath && fs.existsSync(notif.attachmentPath)) {
+        if (notif.attachmentPath && notif.attachmentPath !== 'NONE' && fs.existsSync(notif.attachmentPath)) {
           sendJson(res, 200, {
             ok: true,
             cached: true,
+            hasAttachment: true,
             filename: notif.attachmentName || path.basename(notif.attachmentPath),
             url: `/api/notifications/${id}/attachment`,
             message: 'El archivo adjunto ya se encuentra descargado en el sistema.',
+          });
+          return;
+        }
+
+        if (notif.attachmentName === 'SIN_ADJUNTO' || notif.attachmentPath === 'NONE') {
+          sendJson(res, 200, {
+            ok: false,
+            cached: true,
+            hasAttachment: false,
+            message: 'Esta comunicación es de carácter informativo y no contiene archivos adjuntos en el portal de SUNAT.',
           });
           return;
         }
@@ -413,14 +424,17 @@ export function createWebServer(
             clientService.saveNotificationAttachment(id, dlRes.filePath, dlRes.filename);
             sendJson(res, 200, {
               ok: true,
+              hasAttachment: true,
               filename: dlRes.filename,
               url: `/api/notifications/${id}/attachment`,
               message: dlRes.message || 'Archivo adjunto descargado con éxito.',
             });
           } else {
-            sendJson(res, 404, {
+            clientService.saveNotificationAttachment(id, 'NONE', 'SIN_ADJUNTO');
+            sendJson(res, 200, {
               ok: false,
-              message: dlRes.message || 'La notificación no contiene un archivo adjunto descargable.',
+              hasAttachment: false,
+              message: dlRes.message || 'Esta comunicación es de carácter informativo y no contiene archivos adjuntos en el portal de SUNAT.',
             });
           }
         } catch (dlErr) {
