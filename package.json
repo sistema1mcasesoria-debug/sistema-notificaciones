@@ -5,8 +5,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "start": "node --no-warnings --watch --import tsx src/server/webServer.ts",
+    "build": "node init && tsc",
+    "start": "node init && node --no-warnings --watch --import tsx src/server/webServer.ts",
     "web": "node --no-warnings --watch --import tsx src/server/webServer.ts",
     "keygen": "node --no-warnings --import tsx src/cli/keygen.ts",
     "client:add": "node --no-warnings --import tsx src/cli/manageClients.ts add",
@@ -22,6 +22,7 @@
   },
   "dependencies": {
     "dotenv": "^17.2.3",
+    "node-fetch": "^3.3.2",
     "playwright": "^1.56.1"
   },
   "devDependencies": {

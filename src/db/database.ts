@@ -145,6 +145,24 @@ function initializeSchema(db: DatabaseSync): void {
       'v6_add_mailbox_source_column',
     );
   }
+
+  const appliedV7 = db
+    .prepare('SELECT 1 FROM schema_migrations WHERE id = ?')
+    .get('v7_clean_message_body_table_noise');
+
+  if (!appliedV7) {
+    db.prepare(`
+      DELETE FROM notifications
+      WHERE raw_row_json LIKE '%Tipo de Comprobante%'
+         OR raw_row_json LIKE '%Pendiente (Puesto a disposición)%'
+         OR raw_row_json LIKE '%col_27%'
+         OR subject LIKE 'RUC:%GEN INVERSIONES Y MULTISERVICIOS%'
+         OR subject LIKE 'PHQ CONSULTING S.A.C.%'
+    `).run();
+    db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(
+      'v7_clean_message_body_table_noise',
+    );
+  }
 }
 
 export function closeDatabase(): void {
