@@ -393,7 +393,10 @@ export function createWebServer(
             ok: false,
             cached: true,
             hasAttachment: false,
-            message: 'Esta comunicación es de carácter informativo y no contiene archivos adjuntos en el portal de SUNAT.',
+            message:
+              notif.portal === 'SUNAFIL'
+                ? 'Esta comunicación es de carácter informativo y no contiene archivos adjuntos en la casilla de SUNAFIL.'
+                : 'Esta comunicación es de carácter informativo y no contiene archivos adjuntos en el portal de SUNAT.',
           });
           return;
         }
