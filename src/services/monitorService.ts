@@ -1,5 +1,7 @@
 import type { AppConfig } from '../config/env.js';
+import { checkSunafilMailbox } from '../scraper/sunafilScraper.js';
 import { checkSunatMailbox } from '../scraper/sunatScraper.js';
+import type { PortalType } from '../scraper/types.js';
 import { maskSecret } from '../security/crypto.js';
 import type { ClientService } from './clientService.js';
 
@@ -35,6 +37,7 @@ export async function runMonitorCycle(
   config: AppConfig,
   onlyClientId?: number,
   onProgress?: (progress: MonitorProgressEvent) => void,
+  targetPortal: PortalType | 'ALL' = 'ALL',
 ): Promise<MonitorCycleSummary> {
   const credentialsList = clientService.getActiveCredentials(onlyClientId);
 
@@ -50,8 +53,10 @@ export async function runMonitorCycle(
     };
   }
 
+  const portalLabel =
+    targetPortal === 'ALL' ? 'SUNAT y SUNAFIL' : targetPortal;
   console.log(
-    `\n[${nowLocalIso()}] Iniciando revision de ${credentialsList.length} buzon(es) SUNAT...`,
+    `\n[${nowLocalIso()}] Iniciando revision de ${credentialsList.length} buzon(es) [${portalLabel}]...`,
   );
 
   let clientsOk = 0;
@@ -60,15 +65,7 @@ export async function runMonitorCycle(
 
   for (let i = 0; i < credentialsList.length; i++) {
     const cred = credentialsList[i];
-    const startedAt = nowLocalIso();
-
-    onProgress?.({
-      index: i + 1,
-      total: credentialsList.length,
-      clientId: cred.clientId,
-      label: cred.label,
-      docNumber: cred.docNumber,
-    });
+    let clientHadError = false;
 
     const userPreview =
       cred.loginMode === 'RUC' ? ` | Usuario: ${maskSecret(cred.solUser)}` : '';
@@ -76,41 +73,104 @@ export async function runMonitorCycle(
       `\n-> [${i + 1}/${credentialsList.length}] Revisando "${cred.label}" (${cred.loginMode}: ${cred.docNumber}${userPreview})...`,
     );
 
-    const scrapeResult = await checkSunatMailbox(cred, config);
-    const finishedAt = nowLocalIso();
+    // 1. Revisar SUNAT si corresponde
+    if (targetPortal === 'SUNAT' || targetPortal === 'ALL') {
+      onProgress?.({
+        index: i + 1,
+        total: credentialsList.length,
+        clientId: cred.clientId,
+        label: `${cred.label} (SUNAT)`,
+        docNumber: cred.docNumber,
+      });
 
-    const recorded = clientService.recordCheckResult({
-      clientId: cred.clientId,
-      startedAt,
-      finishedAt,
-      status: scrapeResult.status,
-      notifications: scrapeResult.notifications,
-      errorMessage: scrapeResult.status === 'OK' ? undefined : scrapeResult.message,
-    });
+      console.log(`   [SUNAT] Consultando Buzón Electrónico SUNAT...`);
+      const startedAt = nowLocalIso();
+      const scrapeResult = await checkSunatMailbox(cred, config);
+      const finishedAt = nowLocalIso();
 
-    if (scrapeResult.status === 'OK') {
-      clientsOk++;
-      newNotificationsTotal += recorded.newFound;
-      console.log(
-        `   [OK] ${scrapeResult.message} | Nuevas alertas detectadas: ${recorded.newFound}`,
-      );
+      const recorded = clientService.recordCheckResult({
+        clientId: cred.clientId,
+        startedAt,
+        finishedAt,
+        status: scrapeResult.status,
+        notifications: scrapeResult.notifications,
+        errorMessage: scrapeResult.status === 'OK' ? undefined : scrapeResult.message,
+      });
 
-      if (recorded.newItems.length > 0) {
-        console.log('   --- Nuevas notificaciones detectadas ---');
-        for (const item of recorded.newItems) {
-          console.log(
-            `   * [${item.publishedAt || 'Sin fecha'}] ${item.subject}${
-              item.sunatCode ? ` (Ref: ${item.sunatCode})` : ''
-            }`,
-          );
+      if (scrapeResult.status === 'OK') {
+        newNotificationsTotal += recorded.newFound;
+        console.log(
+          `   [SUNAT OK] ${scrapeResult.message} | Nuevas alertas: ${recorded.newFound}`,
+        );
+        if (recorded.newItems.length > 0) {
+          for (const item of recorded.newItems) {
+            console.log(
+              `      * [${item.publishedAt || 'Sin fecha'}] ${item.subject}${
+                item.sunatCode ? ` (Ref: ${item.sunatCode})` : ''
+              }`,
+            );
+          }
+        }
+      } else {
+        clientHadError = true;
+        console.error(`   [SUNAT ${scrapeResult.status}] ${scrapeResult.message}`);
+        if (scrapeResult.debugScreenshotPath) {
+          console.error(`   Captura SUNAT: ${scrapeResult.debugScreenshotPath}`);
         }
       }
-    } else {
-      clientsFailed++;
-      console.error(`   [${scrapeResult.status}] ${scrapeResult.message}`);
-      if (scrapeResult.debugScreenshotPath) {
-        console.error(`   Captura de depuracion: ${scrapeResult.debugScreenshotPath}`);
+    }
+
+    // 2. Revisar SUNAFIL si corresponde
+    if (targetPortal === 'SUNAFIL' || targetPortal === 'ALL') {
+      onProgress?.({
+        index: i + 1,
+        total: credentialsList.length,
+        clientId: cred.clientId,
+        label: `${cred.label} (SUNAFIL)`,
+        docNumber: cred.docNumber,
+      });
+
+      console.log(`   [SUNAFIL] Consultando Casilla Electrónica SUNAFIL...`);
+      const startedAt = nowLocalIso();
+      const scrapeResult = await checkSunafilMailbox(cred, config);
+      const finishedAt = nowLocalIso();
+
+      const recorded = clientService.recordCheckResult({
+        clientId: cred.clientId,
+        startedAt,
+        finishedAt,
+        status: scrapeResult.status,
+        notifications: scrapeResult.notifications,
+        errorMessage: scrapeResult.status === 'OK' ? undefined : scrapeResult.message,
+      });
+
+      if (scrapeResult.status === 'OK') {
+        newNotificationsTotal += recorded.newFound;
+        console.log(
+          `   [SUNAFIL OK] ${scrapeResult.message} | Nuevas alertas: ${recorded.newFound}`,
+        );
+        if (recorded.newItems.length > 0) {
+          for (const item of recorded.newItems) {
+            console.log(
+              `      * [${item.publishedAt || 'Sin fecha'}] [${item.mailboxSource}] ${item.subject}${
+                item.termDays ? ` (Plazo: ${item.termDays} días)` : ''
+              }`,
+            );
+          }
+        }
+      } else {
+        clientHadError = true;
+        console.error(`   [SUNAFIL ${scrapeResult.status}] ${scrapeResult.message}`);
+        if (scrapeResult.debugScreenshotPath) {
+          console.error(`   Captura SUNAFIL: ${scrapeResult.debugScreenshotPath}`);
+        }
       }
+    }
+
+    if (clientHadError) {
+      clientsFailed++;
+    } else {
+      clientsOk++;
     }
 
     if (i < credentialsList.length - 1 && config.delayBetweenClientsMs > 0) {

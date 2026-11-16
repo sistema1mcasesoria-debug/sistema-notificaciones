@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Monitor Buzón SUNAT — Panel Centralizado</title>
+    <title>Monitor SUNAT & SUNAFIL — Panel Centralizado</title>
     <link
       rel="icon"
       type="image/svg+xml"
@@ -17,8 +17,8 @@
         <div class="brand">
           <div class="brand-mark" aria-hidden="true">SOL</div>
           <div>
-            <h1>Monitor Buzón SUNAT</h1>
-            <p class="brand-subtitle">Bandeja centralizada de notificaciones y claves cifradas</p>
+            <h1>Monitor SUNAT & SUNAFIL</h1>
+            <p class="brand-subtitle">Bandeja unificada de buzón electrónico (SUNAT) y casilla electrónica (SUNAFIL)</p>
           </div>
         </div>
 
@@ -155,11 +155,28 @@
                   </div>
 
                   <div class="filter-field">
-                    <label for="filter-mailbox">Buzón</label>
+                    <label for="filter-portal">Entidad / Portal</label>
+                    <select id="filter-portal" name="portal">
+                      <option value="ALL">Todos los portales</option>
+                      <option value="SUNAT">🏛️ SUNAT</option>
+                      <option value="SUNAFIL">🏢 SUNAFIL</option>
+                    </select>
+                  </div>
+
+                  <div class="filter-field">
+                    <label for="filter-mailbox">Sección / Buzón</label>
                     <select id="filter-mailbox" name="mailboxSource">
-                      <option value="">Todos los buzones</option>
-                      <option value="NOTIFICACIONES">Buzón Notificaciones</option>
-                      <option value="MENSAJES">Buzón Mensajes</option>
+                      <option value="">Todas las secciones</option>
+                      <optgroup label="SUNAT">
+                        <option value="NOTIFICACIONES">Buzón Notificaciones</option>
+                        <option value="MENSAJES">Buzón Mensajes</option>
+                      </optgroup>
+                      <optgroup label="SUNAFIL">
+                        <option value="ACCIONES_PREVIAS">Acciones Previas</option>
+                        <option value="FISCALIZACION">Fiscalización</option>
+                        <option value="COBRANZA">Cobranza</option>
+                        <option value="ORIENTACION">Orientación</option>
+                      </optgroup>
                     </select>
                   </div>
 
@@ -185,14 +202,14 @@
             >
               <table id="notifications-table">
                 <caption id="inbox-table-caption" class="table-caption">
-                  Mensajes y notificaciones centralizadas de los buzones electrónicos SUNAT
+                  Mensajes y notificaciones centralizadas de SUNAT y SUNAFIL
                 </caption>
                 <thead>
                   <tr>
                     <th scope="col">Cliente / RUC</th>
                     <th scope="col">Estado</th>
-                    <th scope="col">Buzón</th>
-                    <th scope="col">Fecha SUNAT</th>
+                    <th scope="col">Entidad / Buzón</th>
+                    <th scope="col">Fecha / Plazo</th>
                     <th scope="col">Asunto / Remitente</th>
                     <th scope="col">Código</th>
                     <th scope="col">Acciones</th>

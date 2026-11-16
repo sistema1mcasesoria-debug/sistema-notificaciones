@@ -379,3 +379,96 @@ test('API REST, seguridad, indicador Cargando y panel web en Chrome funcionan co
     fs.rmSync(tmpDb, { force: true });
   }
 });
+
+test('soporte para portal SUNAFIL en base de datos, filtrado y estadísticas del panel', async () => {
+  const tmpDb = path.join(os.tmpdir(), `sunafil_test_${Date.now()}.db`);
+  const key = generateEncryptionKeyHex();
+
+  try {
+    const db = getDatabase(tmpDb);
+    const svc = new ClientService(db, key);
+    const clientId = svc.addClient({
+      label: 'Empresa Test SUNAFIL SAC',
+      loginMode: 'RUC',
+      docNumber: '20608536362',
+      solUser: 'TESTUSER',
+      solPassword: 'TESTPASSWORD',
+    });
+
+    // 1. Guardar notificaciones de SUNAT y de SUNAFIL
+    svc.recordCheckResult({
+      clientId,
+      startedAt: '2026-11-16 08:00:00',
+      finishedAt: '2026-11-16 08:01:00',
+      status: 'OK',
+      notifications: [
+        {
+          portal: 'SUNAT',
+          sunatCode: 'REF-SUNAT-001',
+          subject: 'Comprobante de Pago RHE puesto a disposicion',
+          sender: 'SUNAT',
+          notificationType: 'Mensaje SUNAT',
+          publishedAt: '15/11/2026 08:30:00',
+          readStatusSunat: 'No leído',
+          mailboxSource: 'MENSAJES',
+          rawRow: { col_1: 'Val 1' },
+        },
+        {
+          portal: 'SUNAFIL',
+          sunatCode: '0000061650-2026',
+          subject: 'Carta Inductiva 0000061650-2026',
+          sender: 'SUNAFIL',
+          notificationType: 'Acción Previa',
+          publishedAt: '14/11/2026 12:00:00',
+          readStatusSunat: 'Pendiente',
+          mailboxSource: 'ACCIONES_PREVIAS',
+          termDays: '10',
+          deadlineAt: '28/11/2026',
+          rawRow: { 'Tipo Requerimiento': 'Carta Inductiva' },
+        },
+      ],
+    });
+
+    // 2. Verificar filtrado por portal
+    const allNotifs = svc.listNotifications({ clientId });
+    assert.equal(allNotifs.length, 2);
+
+    const sunatOnly = svc.listNotifications({ clientId, portal: 'SUNAT' });
+    assert.equal(sunatOnly.length, 1);
+    assert.equal(sunatOnly[0].portal, 'SUNAT');
+    assert.equal(sunatOnly[0].sunatCode, 'REF-SUNAT-001');
+
+    const sunafilOnly = svc.listNotifications({ clientId, portal: 'SUNAFIL' });
+    assert.equal(sunafilOnly.length, 1);
+    assert.equal(sunafilOnly[0].portal, 'SUNAFIL');
+    assert.equal(sunafilOnly[0].sunatCode, '0000061650-2026');
+    assert.equal(sunafilOnly[0].termDays, '10');
+    assert.equal(sunafilOnly[0].deadlineAt, '28/11/2026');
+
+    // 3. Verificar estadísticas segregadas
+    const stats = svc.getDashboardStats();
+    assert.equal(stats.unreadAlerts, 2);
+    assert.equal(stats.unreadSunatAlerts, 1);
+    assert.equal(stats.unreadSunafilAlerts, 1);
+
+    // 4. Verificar endpoint REST /api/notifications?portal=SUNAFIL
+    const config = getConfig();
+    const server = createWebServer(svc, config);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const resp = await fetch(`http://127.0.0.1:${port}/api/notifications?portal=SUNAFIL`);
+      assert.equal(resp.status, 200);
+      const data = (await resp.json()) as { notifications: Array<{ portal: string; sunatCode: string }> };
+      assert.equal(data.notifications.length, 1);
+      assert.equal(data.notifications[0].portal, 'SUNAFIL');
+      assert.equal(data.notifications[0].sunatCode, '0000061650-2026');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  } finally {
+    closeDatabase();
+    fs.rmSync(tmpDb, { force: true });
+  }
+});

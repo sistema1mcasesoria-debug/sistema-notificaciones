@@ -163,6 +163,28 @@ function initializeSchema(db: DatabaseSync): void {
       'v7_clean_message_body_table_noise',
     );
   }
+
+  const appliedV8 = db
+    .prepare('SELECT 1 FROM schema_migrations WHERE id = ?')
+    .get('v8_add_sunafil_support');
+
+  if (!appliedV8) {
+    try {
+      db.prepare("ALTER TABLE notifications ADD COLUMN portal TEXT NOT NULL DEFAULT 'SUNAT'").run();
+    } catch {}
+    try {
+      db.prepare('ALTER TABLE notifications ADD COLUMN deadline_at TEXT').run();
+    } catch {}
+    try {
+      db.prepare('ALTER TABLE notifications ADD COLUMN term_days TEXT').run();
+    } catch {}
+    try {
+      db.prepare('CREATE INDEX IF NOT EXISTS idx_notifications_portal ON notifications(portal, client_id, published_at DESC)').run();
+    } catch {}
+    db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(
+      'v8_add_sunafil_support',
+    );
+  }
 }
 
 export function closeDatabase(): void {

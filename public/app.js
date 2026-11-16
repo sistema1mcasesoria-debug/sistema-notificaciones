@@ -38,6 +38,7 @@ const tabBadgeClients = document.getElementById('tab-badge-clients');
 const filterForm = document.getElementById('filter-form');
 const filterQuery = document.getElementById('filter-query');
 const filterClient = document.getElementById('filter-client');
+const filterPortal = document.getElementById('filter-portal');
 const filterMailbox = document.getElementById('filter-mailbox');
 const filterOnlyNew = document.getElementById('filter-only-new');
 
@@ -444,11 +445,32 @@ function createStatusBadge(status) {
   return el('span', 'badge badge-error', 'Error');
 }
 
-function createMailboxBadge(mailboxSource) {
-  if (mailboxSource === 'MENSAJES') {
-    return el('span', 'badge badge-mailbox-messages', 'Buzón Mensajes');
+function createMailboxBadge(mailboxSource, portal) {
+  const wrap = el('div', 'mailbox-badge-wrap');
+  wrap.style.display = 'flex';
+  wrap.style.flexDirection = 'column';
+  wrap.style.gap = '3px';
+
+  if (portal === 'SUNAFIL') {
+    wrap.append(el('span', 'badge badge-portal-sunafil', '🏢 SUNAFIL'));
+    const sectionNames = {
+      ACCIONES_PREVIAS: 'Acciones Previas',
+      FISCALIZACION: 'Fiscalización',
+      COBRANZA: 'Cobranza',
+      ORIENTACION: 'Orientación',
+    };
+    const sName = sectionNames[mailboxSource] || mailboxSource || 'Casilla';
+    wrap.append(el('span', 'badge badge-sunafil', sName));
+    return wrap;
   }
-  return el('span', 'badge badge-mailbox-notifications', 'Buzón Notificaciones');
+
+  wrap.append(el('span', 'badge badge-portal-sunat', '🏛️ SUNAT'));
+  if (mailboxSource === 'MENSAJES') {
+    wrap.append(el('span', 'badge badge-mailbox-messages', 'Buzón Mensajes'));
+  } else {
+    wrap.append(el('span', 'badge badge-mailbox-notifications', 'Buzón Notif.'));
+  }
+  return wrap;
 }
 
 function renderNotifications(notifications) {
@@ -481,20 +503,27 @@ function renderNotifications(notifications) {
           : el('span', 'badge badge-neutral', 'Revisada'),
       );
     }
-    if (URGENT_PATTERN.test(item.subject)) {
-      tdStatus.append(el('span', 'badge badge-urgent', 'Importante'));
+    if (URGENT_PATTERN.test(item.subject) || item.portal === 'SUNAFIL') {
+      tdStatus.append(el('span', 'badge badge-urgent', item.portal === 'SUNAFIL' ? 'Laboral' : 'Importante'));
     }
 
-    // Col 3: Buzón de origen (Buzón Notificaciones vs Buzón Mensajes)
+    // Col 3: Entidad y Buzón de origen
     const tdMailbox = document.createElement('td');
-    tdMailbox.append(createMailboxBadge(item.mailboxSource));
+    tdMailbox.append(createMailboxBadge(item.mailboxSource, item.portal));
 
-    // Col 4: Fecha SUNAT
+    // Col 4: Fecha / Plazo
     const tdDate = document.createElement('td');
     tdDate.append(el('span', 'cell-primary', item.publishedAt || 'Sin fecha'));
-    tdDate.append(
-      el('span', 'cell-secondary', `Detectada: ${formatLocalTimestamp(item.firstSeenAt)}`),
-    );
+    if (item.termDays) {
+      tdDate.append(el('span', 'badge badge-deadline', `⏱️ Plazo: ${item.termDays} días`));
+    }
+    if (item.deadlineAt) {
+      tdDate.append(el('span', 'cell-secondary', `Vence: ${item.deadlineAt}`));
+    } else {
+      tdDate.append(
+        el('span', 'cell-secondary', `Detectada: ${formatLocalTimestamp(item.firstSeenAt)}`),
+      );
+    }
 
     // Col 5: Asunto / Remitente
     const tdSubject = document.createElement('td');
@@ -511,7 +540,7 @@ function renderNotifications(notifications) {
     const tdCode = document.createElement('td');
     tdCode.textContent = item.sunatCode || '—';
 
-    // Col 7: Acciones (Iconos: ojito para ver detalle, check SOLO si está pendiente de revisión)
+    // Col 7: Acciones (Iconos: ojito para ver detalle, check SOLO si es SUNAT y está pendiente de revisión)
     const tdActions = document.createElement('td');
     const actionsWrap = el('div', 'row-actions');
 
@@ -523,8 +552,8 @@ function renderNotifications(notifications) {
     btnDetail.addEventListener('click', () => openNotificationDetail(item));
     actionsWrap.append(btnDetail);
 
-    // Si ya está revisado o figura como leída en SUNAT, NO debe aparecer el check
-    if (!isReviewedOrRead) {
+    // En SUNAFIL la casilla no tiene endpoint de "marcar como leída". Solo en SUNAT si está pendiente
+    if (!isReviewedOrRead && item.portal !== 'SUNAFIL') {
       const btnCheck = el('button', 'btn-action-icon btn-action-check');
       btnCheck.type = 'button';
       btnCheck.setAttribute('aria-label', `Marcar como leída en SUNAT: ${item.subject}`);
@@ -660,6 +689,7 @@ async function loadDashboard() {
   const params = new URLSearchParams();
   if (filterQuery.value.trim()) params.set('q', filterQuery.value.trim());
   if (filterClient.value) params.set('clientId', filterClient.value);
+  if (filterPortal && filterPortal.value && filterPortal.value !== 'ALL') params.set('portal', filterPortal.value);
   if (filterMailbox.value) params.set('mailboxSource', filterMailbox.value);
   if (filterOnlyNew.checked) params.set('onlyNew', 'true');
 
@@ -712,11 +742,14 @@ function startStatusPolling() {
 // =========================================================
 // ACCIONES DE USUARIO
 // =========================================================
-async function triggerCheck(clientId) {
+async function triggerCheck(clientId, targetPortal) {
+  const portal = targetPortal || (filterPortal && filterPortal.value !== 'ALL' ? filterPortal.value : 'ALL');
+  const portalLabel = portal === 'ALL' ? 'SUNAT y SUNAFIL' : portal;
+
   loadingBanner.hidden = false;
   loadingBannerDetail.textContent = clientId
-    ? 'Iniciando navegador oculto en segundo plano para el cliente seleccionado...'
-    : 'Iniciando navegador oculto en segundo plano para revisar todos los buzones...';
+    ? `Iniciando navegador oculto en segundo plano para el cliente seleccionado [${portalLabel}]...`
+    : `Iniciando navegador oculto en segundo plano para revisar los buzones [${portalLabel}]...`;
   monitorPill.classList.add('is-running');
   monitorPillText.textContent = 'Cargando...';
   btnCheckAll.disabled = true;
@@ -726,7 +759,10 @@ async function triggerCheck(clientId) {
   }
 
   try {
-    const payload = clientId ? { clientId } : {};
+    const payload = {
+      ...(clientId ? { clientId } : {}),
+      portal,
+    };
     const res = await apiJson('/api/check', {
       method: 'POST',
       body: JSON.stringify(payload),
@@ -882,21 +918,48 @@ confirmDeleteDialog.addEventListener('close', async () => {
 // =========================================================
 // MODAL DETALLE DE NOTIFICACIÓN
 // =========================================================
+function formatMailboxSectionLabel(mailboxSource, portal) {
+  if (portal === 'SUNAFIL') {
+    const names = {
+      ACCIONES_PREVIAS: 'Actos Administrativos -> Acciones Previas',
+      FISCALIZACION: 'Actos Administrativos -> Notificaciones Fiscalización',
+      COBRANZA: 'Actos Administrativos -> Notificaciones Cobranza',
+      ORIENTACION: 'Orientación -> Sunafil te Orienta',
+    };
+    return names[mailboxSource] || mailboxSource || 'Casilla SUNAFIL';
+  }
+  return mailboxSource === 'MENSAJES' ? 'Buzón Mensajes' : 'Buzón Notificaciones';
+}
+
 function openNotificationDetail(item) {
   state.activeDetailNotificationId = item.id;
   detailBody.replaceChildren();
 
+  const portal = item.portal || 'SUNAT';
   const fields = [
     ['Cliente', `${item.clientLabel} (${item.docNumber})`],
-    ['Buzón de origen', item.mailboxSource === 'MENSAJES' ? 'Buzón Mensajes' : 'Buzón Notificaciones'],
-    ['Fecha SUNAT', item.publishedAt || 'Sin fecha'],
+    ['Entidad / Portal', portal === 'SUNAFIL' ? '🏢 SUNAFIL (Casilla Electrónica)' : '🏛️ SUNAT (Buzón SOL)'],
+    ['Buzón / Sección', formatMailboxSectionLabel(item.mailboxSource, portal)],
+    [`Fecha ${portal}`, item.publishedAt || 'Sin fecha'],
+  ];
+
+  if (portal === 'SUNAFIL') {
+    if (item.termDays) {
+      fields.push(['Plazo de Descargo', `${item.termDays} días hábiles`]);
+    }
+    if (item.deadlineAt) {
+      fields.push(['Fecha Límite', item.deadlineAt]);
+    }
+  }
+
+  fields.push(
     ['Código / Referencia', item.sunatCode || '—'],
     ['Tipo / Categoría', item.notificationType || '—'],
     ['Asunto', item.subject],
     ['Remitente / Dependencia', item.sender || '—'],
-    ['Estado en SUNAT', item.readStatusSunat || '—'],
+    [`Estado en ${portal}`, item.readStatusSunat || '—'],
     ['Detectada por el monitor', formatLocalTimestamp(item.firstSeenAt)],
-  ];
+  );
 
   for (const [label, val] of fields) {
     const box = el('div', 'detail-item');
@@ -915,20 +978,28 @@ function openNotificationDetail(item) {
     detailBody.append(box);
   }
 
-  // Archivo Adjunto / Constancia SUNAT
+  // Archivo Adjunto / Constancia Oficial (PDF)
   const attachBox = el('div', 'detail-item detail-item-attachment');
-  attachBox.append(el('span', 'detail-item-label', 'Archivo Adjunto / Constancia SUNAT'));
+  const attachTitle =
+    portal === 'SUNAFIL'
+      ? 'Documento Oficial SUNAFIL (PDF)'
+      : 'Archivo Adjunto / Constancia SUNAT';
+  attachBox.append(el('span', 'detail-item-label', attachTitle));
 
   if (item.attachmentPath && item.attachmentPath !== 'NONE' && item.attachmentName !== 'SIN_ADJUNTO') {
     const attachWrap = el('div', 'attach-actions');
-    const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir / Descargar (${item.attachmentName || 'Archivo'})`);
+    const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir / Descargar (${item.attachmentName || 'Documento PDF'})`);
     btnView.href = `/api/notifications/${item.id}/attachment`;
     btnView.target = '_blank';
     btnView.rel = 'noopener noreferrer';
     attachWrap.append(btnView);
     attachBox.append(attachWrap);
   } else if (item.attachmentName === 'SIN_ADJUNTO' || item.attachmentPath === 'NONE') {
-    const infoText = el('div', 'alert-info-box', 'ℹ️ Esta comunicación es únicamente informativa y no contiene archivo adjunto en el portal de SUNAT.');
+    const emptyMsg =
+      portal === 'SUNAFIL'
+        ? 'ℹ️ Esta comunicación no contiene archivo adjunto en la casilla de SUNAFIL.'
+        : 'ℹ️ Esta comunicación es únicamente informativa y no contiene archivo adjunto en el portal de SUNAT.';
+    const infoText = el('div', 'alert-info-box', emptyMsg);
     infoText.style.padding = '8px 12px';
     infoText.style.background = '#f0f4f8';
     infoText.style.borderRadius = '6px';
@@ -937,11 +1008,18 @@ function openNotificationDetail(item) {
     attachBox.append(infoText);
   } else {
     const attachWrap = el('div', 'attach-actions');
-    const btnDownload = el('button', 'btn btn-secondary btn-sm', '📥 Descargar Adjunto de SUNAT');
+    const dlBtnText =
+      portal === 'SUNAFIL'
+        ? '📥 Descargar Documento de SUNAFIL (PDF)'
+        : '📥 Descargar Adjunto de SUNAT';
+    const btnDownload = el('button', 'btn btn-secondary btn-sm', dlBtnText);
     btnDownload.type = 'button';
     btnDownload.addEventListener('click', async () => {
       btnDownload.disabled = true;
-      btnDownload.textContent = '⏳ Verificando adjunto en SUNAT en segundo plano...';
+      btnDownload.textContent =
+        portal === 'SUNAFIL'
+          ? '⏳ Descargando documento de SUNAFIL en segundo plano...'
+          : '⏳ Verificando adjunto en SUNAT en segundo plano...';
       try {
         const res = await apiJson(`/api/notifications/${item.id}/download-attachment`, {
           method: 'POST',
@@ -960,7 +1038,7 @@ function openNotificationDetail(item) {
       } catch (err) {
         showToast(err.message, true);
         btnDownload.disabled = false;
-        btnDownload.textContent = '📥 Descargar Adjunto de SUNAT';
+        btnDownload.textContent = dlBtnText;
       }
     });
     attachWrap.append(btnDownload);
@@ -968,7 +1046,7 @@ function openNotificationDetail(item) {
   }
   detailBody.append(attachBox);
 
-  btnDetailAck.hidden = !item.isNewAlert && item.readStatusSunat === 'Leído';
+  btnDetailAck.hidden = portal === 'SUNAFIL' || (!item.isNewAlert && item.readStatusSunat === 'Leído');
   detailDialog.showModal();
 }
 
@@ -1118,6 +1196,10 @@ filterForm.addEventListener('submit', (e) => {
 });
 
 filterMailbox.addEventListener('change', () => {
+  void loadDashboard();
+});
+
+filterPortal?.addEventListener('change', () => {
   void loadDashboard();
 });
 

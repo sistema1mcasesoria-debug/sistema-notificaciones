@@ -10,6 +10,7 @@ import type {
   ClientCredentials,
   LoginMode,
   MailboxSource,
+  PortalType,
   SunatNotificationItem,
 } from '../scraper/types.js';
 
@@ -31,6 +32,7 @@ export interface StoredNotification {
   clientId: number;
   clientLabel: string;
   docNumber: string;
+  portal: PortalType;
   sunatCode: string | null;
   subject: string;
   sender: string | null;
@@ -38,6 +40,8 @@ export interface StoredNotification {
   mailboxSource: MailboxSource;
   publishedAt: string | null;
   readStatusSunat: string | null;
+  deadlineAt: string | null;
+  termDays: string | null;
   isNewAlert: boolean;
   firstSeenAt: string;
   rawRow: Record<string, string>;
@@ -62,6 +66,8 @@ export interface DashboardStats {
   totalClients: number;
   activeClients: number;
   unreadAlerts: number;
+  unreadSunatAlerts: number;
+  unreadSunafilAlerts: number;
   errorClients: number;
   lastCheckedAt: string | null;
 }
@@ -241,9 +247,10 @@ export class ClientService {
 
     const insertNotif = this.db.prepare(`
       INSERT OR IGNORE INTO notifications (
-        client_id, external_hash, sunat_code, subject, sender,
-        notification_type, mailbox_source, published_at, read_status_sunat, is_new_alert, raw_row_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        client_id, external_hash, portal, sunat_code, subject, sender,
+        notification_type, mailbox_source, published_at, deadline_at, term_days,
+        read_status_sunat, is_new_alert, raw_row_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const syncExistingMailboxSource = this.db.prepare(`
@@ -253,7 +260,9 @@ export class ClientService {
     `);
 
     for (const item of notifications) {
+      const portal = item.portal || 'SUNAT';
       const fingerprintSource = [
+        portal,
         item.sunatCode ?? '',
         item.publishedAt ?? '',
         item.subject,
@@ -267,12 +276,15 @@ export class ClientService {
       const res = insertNotif.run(
         clientId,
         externalHash,
+        portal,
         item.sunatCode,
         item.subject,
         item.sender,
         item.notificationType,
         mailboxSource,
         item.publishedAt,
+        item.deadlineAt || null,
+        item.termDays || null,
         item.readStatusSunat,
         initialIsNewAlert,
         JSON.stringify(item.rawRow),
@@ -325,7 +337,14 @@ export class ClientService {
     mailboxSource: string | null | undefined,
     notificationType: string | null | undefined,
   ): MailboxSource {
-    if (mailboxSource === 'MENSAJES' || mailboxSource === 'NOTIFICACIONES') {
+    if (
+      mailboxSource === 'MENSAJES' ||
+      mailboxSource === 'NOTIFICACIONES' ||
+      mailboxSource === 'FISCALIZACION' ||
+      mailboxSource === 'COBRANZA' ||
+      mailboxSource === 'ACCIONES_PREVIAS' ||
+      mailboxSource === 'ORIENTACION'
+    ) {
       return mailboxSource;
     }
     return /mensaje/i.test(notificationType || '') ? 'MENSAJES' : 'NOTIFICACIONES';
@@ -365,12 +384,14 @@ export class ClientService {
   listNotifications(options?: {
     onlyNew?: boolean;
     clientId?: number;
+    portal?: PortalType | 'ALL';
     mailboxSource?: MailboxSource;
     query?: string;
     limit?: number;
   }): StoredNotification[] {
     const onlyNew = options?.onlyNew ?? false;
     const clientId = options?.clientId;
+    const portal = options?.portal;
     const mailboxSource = options?.mailboxSource;
     const query = options?.query?.trim() ?? '';
     const limit = options?.limit ?? 100;
@@ -385,7 +406,11 @@ export class ClientService {
       conditions.push('n.client_id = ?');
       params.push(clientId);
     }
-    if (mailboxSource === 'NOTIFICACIONES' || mailboxSource === 'MENSAJES') {
+    if (portal && portal !== 'ALL') {
+      conditions.push('n.portal = ?');
+      params.push(portal);
+    }
+    if (mailboxSource) {
       conditions.push('n.mailbox_source = ?');
       params.push(mailboxSource);
     }
@@ -406,6 +431,7 @@ export class ClientService {
           n.client_id,
           c.label AS client_label,
           c.doc_number,
+          COALESCE(n.portal, 'SUNAT') AS portal,
           n.sunat_code,
           n.subject,
           n.sender,
@@ -413,6 +439,8 @@ export class ClientService {
           n.mailbox_source,
           n.published_at,
           n.read_status_sunat,
+          n.deadline_at,
+          n.term_days,
           n.is_new_alert,
           n.raw_row_json,
           n.first_seen_at,
@@ -428,6 +456,7 @@ export class ClientService {
       client_id: number;
       client_label: string;
       doc_number: string;
+      portal: string;
       sunat_code: string | null;
       subject: string;
       sender: string | null;
@@ -435,6 +464,8 @@ export class ClientService {
       mailbox_source: string | null;
       published_at: string | null;
       read_status_sunat: string | null;
+      deadline_at: string | null;
+      term_days: string | null;
       is_new_alert: number;
       raw_row_json: string | null;
       first_seen_at: string;
@@ -457,6 +488,7 @@ export class ClientService {
         clientId: r.client_id,
         clientLabel: r.client_label,
         docNumber: r.doc_number,
+        portal: (r.portal as PortalType) || 'SUNAT',
         sunatCode: r.sunat_code,
         subject: r.subject,
         sender: r.sender,
@@ -464,6 +496,8 @@ export class ClientService {
         mailboxSource: this.resolveMailboxSource(r.mailbox_source, r.notification_type),
         publishedAt: r.published_at,
         readStatusSunat: r.read_status_sunat,
+        deadlineAt: r.deadline_at || null,
+        termDays: r.term_days || null,
         isNewAlert: r.is_new_alert === 1,
         firstSeenAt: r.first_seen_at,
         rawRow,
@@ -514,6 +548,7 @@ export class ClientService {
           n.client_id,
           c.label AS client_label,
           c.doc_number,
+          COALESCE(n.portal, 'SUNAT') AS portal,
           n.sunat_code,
           n.subject,
           n.sender,
@@ -521,6 +556,8 @@ export class ClientService {
           n.mailbox_source,
           n.published_at,
           n.read_status_sunat,
+          n.deadline_at,
+          n.term_days,
           n.is_new_alert,
           n.raw_row_json,
           n.first_seen_at,
@@ -536,6 +573,7 @@ export class ClientService {
           client_id: number;
           client_label: string;
           doc_number: string;
+          portal: string;
           sunat_code: string | null;
           subject: string;
           sender: string | null;
@@ -543,6 +581,8 @@ export class ClientService {
           mailbox_source: string | null;
           published_at: string | null;
           read_status_sunat: string | null;
+          deadline_at: string | null;
+          term_days: string | null;
           is_new_alert: number;
           raw_row_json: string | null;
           first_seen_at: string;
@@ -567,6 +607,7 @@ export class ClientService {
       clientId: row.client_id,
       clientLabel: row.client_label,
       docNumber: row.doc_number,
+      portal: (row.portal as PortalType) || 'SUNAT',
       sunatCode: row.sunat_code,
       subject: row.subject,
       sender: row.sender,
@@ -574,6 +615,8 @@ export class ClientService {
       mailboxSource: this.resolveMailboxSource(row.mailbox_source, row.notification_type),
       publishedAt: row.published_at,
       readStatusSunat: row.read_status_sunat,
+      deadlineAt: row.deadline_at || null,
+      termDays: row.term_days || null,
       isNewAlert: row.is_new_alert === 1,
       firstSeenAt: row.first_seen_at,
       rawRow,
@@ -611,6 +654,8 @@ export class ClientService {
           (SELECT COUNT(*) FROM clients) AS total_clients,
           (SELECT COUNT(*) FROM clients WHERE active = 1) AS active_clients,
           (SELECT COUNT(*) FROM notifications WHERE is_new_alert = 1) AS unread_alerts,
+          (SELECT COUNT(*) FROM notifications WHERE is_new_alert = 1 AND COALESCE(portal, 'SUNAT') = 'SUNAT') AS unread_sunat_alerts,
+          (SELECT COUNT(*) FROM notifications WHERE is_new_alert = 1 AND portal = 'SUNAFIL') AS unread_sunafil_alerts,
           (SELECT COUNT(*) FROM clients WHERE active = 1 AND last_status IN ('AUTH_ERROR', 'CAPTCHA', 'SESSION_ACTIVE', 'ERROR')) AS error_clients,
           (SELECT MAX(last_checked_at) FROM clients) AS last_checked_at
       `)
@@ -618,6 +663,8 @@ export class ClientService {
       total_clients: number;
       active_clients: number;
       unread_alerts: number;
+      unread_sunat_alerts: number;
+      unread_sunafil_alerts: number;
       error_clients: number;
       last_checked_at: string | null;
     };
@@ -626,6 +673,8 @@ export class ClientService {
       totalClients: row.total_clients,
       activeClients: row.active_clients,
       unreadAlerts: row.unread_alerts,
+      unreadSunatAlerts: row.unread_sunat_alerts,
+      unreadSunafilAlerts: row.unread_sunafil_alerts,
       errorClients: row.error_clients,
       lastCheckedAt: row.last_checked_at,
     };

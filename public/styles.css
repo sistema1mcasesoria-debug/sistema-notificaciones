@@ -855,11 +855,44 @@ tbody tr:last-child td {
   border-color: #ddd6fe;
 }
 
+.badge-portal-sunat {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border-color: #bfdbfe;
+  font-weight: 600;
+}
+
+.badge-portal-sunafil {
+  background: #fdf2f2;
+  color: #991b1b;
+  border-color: #fecaca;
+  font-weight: 600;
+}
+
+.badge-sunafil {
+  background: #fff1f2;
+  color: #be123c;
+  border-color: #fecdd3;
+  font-weight: 500;
+}
+
+.badge-deadline {
+  background: #fffbeb;
+  color: #b45309;
+  border-color: #fde68a;
+  font-size: 0.72rem;
+  font-weight: 600;
+  display: inline-block;
+  margin-top: 0.2rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
 /* Etiquetas de columna para vista móvil apilada */
 #notifications-table {
   --label-2: "Estado";
-  --label-3: "Buzón";
-  --label-4: "Fecha SUNAT";
+  --label-3: "Entidad / Buzón";
+  --label-4: "Fecha / Plazo";
   --label-5: "Asunto / Remitente";
   --label-6: "Código";
   --label-7: "Acciones";
