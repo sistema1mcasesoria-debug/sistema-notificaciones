@@ -58,7 +58,7 @@ async function saveDebugScreenshot(page: Page, docNumber: string, prefix: string
   }
 }
 
-async function dismissSunafilModals(page: Page): Promise<void> {
+export async function dismissSunafilModals(page: Page): Promise<void> {
   // 1. Modal de notificación inicial ("Estimado usuario, no tiene nuevas notificaciones...")
   const notifModalClose = page.locator(
     '#formNotificaciones\\:mdNotificaciones button.close, .scNotificaciones button.close, #formNotificaciones\\:mdNotificaciones [data-dismiss="modal"]',
@@ -84,7 +84,7 @@ async function dismissSunafilModals(page: Page): Promise<void> {
   }
 }
 
-async function performSunafilLogin(page: Page, credentials: ClientCredentials, config: AppConfig): Promise<void> {
+export async function performSunafilLogin(page: Page, credentials: ClientCredentials, config: AppConfig): Promise<void> {
   await page.goto(SUNAFIL_LOGIN_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('#btnAceptar', { state: 'visible' });
 
@@ -204,9 +204,12 @@ async function scrapeSunafilTable(
         continue;
       }
 
-      const cells = Array.from(row.querySelectorAll('td')).map((td) =>
-        (td.textContent || '').replace(/\s+/g, ' ').trim(),
-      );
+      const cells = Array.from(row.querySelectorAll('td')).map((td) => {
+        const clone = td.cloneNode(true) as HTMLElement;
+        clone.querySelectorAll('script, style').forEach((s) => s.remove());
+        const cleaned = (clone.textContent || '').replace(/\s+/g, ' ').trim();
+        return cleaned.startsWith('$(') ? '' : cleaned;
+      });
 
       if (cells.length === 0 || (cells.length === 1 && cells[0].length < 3)) {
         continue;
@@ -399,6 +402,14 @@ export async function downloadSunafilAttachment(
   destinationDir: string,
   config: AppConfig,
 ): Promise<AttachmentDownloadResult> {
+  // 0. En Sunafil te Orienta las comunicaciones son boletines informativos HTML y no contienen archivo descargable
+  if (target.mailboxSource === 'ORIENTACION') {
+    return {
+      found: false,
+      message: 'Esta comunicación es un boletín informativo y no contiene archivo descargable en SUNAFIL.',
+    };
+  }
+
   let browser: Browser | null = null;
   try {
     const channel = config.browserChannel || 'chrome';
@@ -422,20 +433,48 @@ export async function downloadSunafilAttachment(
     });
 
     const page = await context.newPage();
-    page.setDefaultTimeout(config.navigationTimeoutMs);
+    page.setDefaultTimeout(15000);
 
     // 1. Iniciar sesión
     await performSunafilLogin(page, credentials, config);
 
     // 2. Determinar la sección a visitar
-    const targetSection = SUNAFIL_SECTIONS.find((s) => s.source === target.mailboxSource) || SUNAFIL_SECTIONS[2]; // Default a Acciones Previas
+    const targetSection = SUNAFIL_SECTIONS.find((s) => s.source === target.mailboxSource) || SUNAFIL_SECTIONS[2];
 
     await page.goto(targetSection.url, { waitUntil: 'domcontentloaded' });
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(2000);
     await dismissSunafilModals(page);
 
-    // 3. Localizar la fila
+    // Si es Fiscalización o Cobranza, primero entramos a "Ver" documentos de la orden/expediente
+    if (target.mailboxSource === 'FISCALIZACION' || target.mailboxSource === 'COBRANZA') {
+      const codeNumbers = (target.sunatCode || '').match(/\d{5,}/)?.[0] || target.sunatCode || '';
+      const orderSearchTerms = [codeNumbers, target.sunatCode].filter(Boolean) as string[];
+
+      let orderRow = null;
+      for (const term of orderSearchTerms) {
+        const candidate = page.locator('tbody tr').filter({ hasText: term }).first();
+        if (await candidate.isVisible({ timeout: 1500 }).catch(() => false)) {
+          orderRow = candidate;
+          break;
+        }
+      }
+
+      if (!orderRow) {
+        orderRow = page.locator('tbody tr').first();
+      }
+
+      const btnVer = orderRow.locator('button, a').filter({ hasText: 'Ver' }).first();
+      if (await btnVer.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await btnVer.click();
+        await page.waitForTimeout(2000);
+        await dismissSunafilModals(page);
+      }
+    }
+
+    // 3. Localizar la fila del documento
+    const coreNumber = (target.sunatCode || '').match(/\d{5,}/)?.[0];
     const searchTerms = [
+      coreNumber,
       target.sunatCode,
       target.subject.slice(0, 30),
       target.publishedAt,
@@ -451,14 +490,21 @@ export async function downloadSunafilAttachment(
     }
 
     if (!targetRow) {
-      return {
-        found: false,
-        message: 'No se encontró la notificación en la lista de SUNAFIL.',
-      };
+      const fallbackRow = page.locator('tbody tr').first();
+      if (await fallbackRow.isVisible({ timeout: 1500 }).catch(() => false)) {
+        targetRow = fallbackRow;
+      } else {
+        return {
+          found: false,
+          message: 'No se encontró la notificación en la lista de SUNAFIL.',
+        };
+      }
     }
 
-    // 4. Buscar botón de descarga en la fila
-    const docBtn = targetRow.locator('.fa-file-pdf-o, .fa-file, .btn-danger, .btn-primary, button:has(.fa-file-pdf-o)').first();
+    // 4. Buscar botón de descarga en la fila (botón rojo con ícono de PDF/ojo)
+    const docBtn = targetRow
+      .locator('button:has(.fa-file-pdf-o), .btn-danger:has(.fa-file-pdf-o), button:has(.fa-eye), .btn-danger')
+      .first();
     if (!(await docBtn.isVisible({ timeout: 2000 }).catch(() => false))) {
       return {
         found: false,
@@ -471,11 +517,11 @@ export async function downloadSunafilAttachment(
     await page.waitForTimeout(1500);
 
     // 5. Clic en "Descargar" dentro del modal con listener de descarga
-    const modalDownloadBtn = page.locator(
-      '#formDescargaDoc\\:mdDescargaDoc button:has-text("Descargar"), .scDescargaDoc button:has-text("Descargar"), .modal.in button:has-text("Descargar")',
-    ).first();
+    const modal = page.locator('#formDescargaDoc\\:mdDescargaDoc, .scDescargaDoc, [id*="DescargaDoc"]').first();
+    await modal.waitFor({ state: 'visible', timeout: 6000 }).catch(() => {});
+    const modalDownloadBtn = modal.locator('button:has-text("Descargar"), a:has-text("Descargar")').first();
 
-    if (!(await modalDownloadBtn.isVisible({ timeout: 3000 }).catch(() => false))) {
+    if (!(await modalDownloadBtn.isVisible({ timeout: 4000 }).catch(() => false))) {
       return {
         found: false,
         message: 'No se abrió el modal de descarga de documento en SUNAFIL.',
@@ -483,7 +529,7 @@ export async function downloadSunafilAttachment(
     }
 
     const [download] = await Promise.all([
-      page.waitForEvent('download', { timeout: 25000 }),
+      page.waitForEvent('download', { timeout: 20000 }),
       modalDownloadBtn.click(),
     ]);
 
