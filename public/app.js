@@ -986,8 +986,20 @@ function openNotificationDetail(item) {
       : 'Documentos SUNAT (Resolución / Sustento y Constancia)';
   attachBox.append(el('span', 'detail-item-label', attachTitle));
 
-  const hasMainDoc = item.attachmentPath && item.attachmentPath !== 'NONE' && item.attachmentName !== 'SIN_ADJUNTO';
-  const hasConstancia = item.constanciaPath && item.constanciaPath !== 'NONE';
+  const isLegacyConstanciaOnly = Boolean(
+    portal !== 'SUNAFIL' &&
+    item.attachmentName &&
+    item.attachmentName.toLowerCase().includes('constancia') &&
+    !item.constanciaPath
+  );
+
+  const hasMainDoc =
+    Boolean(item.attachmentPath && item.attachmentPath !== 'NONE' && item.attachmentName !== 'SIN_ADJUNTO') &&
+    !isLegacyConstanciaOnly;
+
+  const hasConstancia =
+    Boolean(item.constanciaPath && item.constanciaPath !== 'NONE') ||
+    isLegacyConstanciaOnly;
 
   if (hasMainDoc || hasConstancia) {
     const attachWrap = el('div', 'attach-actions');
@@ -1004,11 +1016,49 @@ function openNotificationDetail(item) {
     }
 
     if (hasConstancia) {
-      const btnConstancia = el('a', 'btn btn-secondary btn-sm', `📄 Abrir Constancia de Notificación (${item.constanciaName || 'Constancia PDF'})`);
-      btnConstancia.href = `/api/notifications/${item.id}/constancia`;
+      const constanciaLabel = isLegacyConstanciaOnly
+        ? item.attachmentName
+        : (item.constanciaName || 'Constancia PDF');
+      const constanciaUrl = isLegacyConstanciaOnly
+        ? `/api/notifications/${item.id}/attachment`
+        : `/api/notifications/${item.id}/constancia`;
+
+      const btnConstancia = el('a', 'btn btn-secondary btn-sm', `📄 Abrir Constancia de Notificación (${constanciaLabel})`);
+      btnConstancia.href = constanciaUrl;
       btnConstancia.target = '_blank';
       btnConstancia.rel = 'noopener noreferrer';
       attachWrap.append(btnConstancia);
+    }
+
+    if (isLegacyConstanciaOnly) {
+      const btnFetchMain = el('button', 'btn btn-primary btn-sm', '📥 Descargar Sustento / Resolución faltante de SUNAT');
+      btnFetchMain.type = 'button';
+      btnFetchMain.addEventListener('click', async () => {
+        btnFetchMain.disabled = true;
+        btnFetchMain.textContent = '⏳ Descargando Resolución de SUNAT...';
+        try {
+          const res = await apiJson(`/api/notifications/${item.id}/download-attachment`, {
+            method: 'POST',
+            body: '{}',
+          });
+          showToast(res.message || 'Resolución descargada correctamente.');
+          if (res.hasAttachment && res.url) {
+            item.attachmentPath = res.url;
+            item.attachmentName = res.filename;
+          }
+          if (res.hasConstancia && res.constanciaUrl) {
+            item.constanciaPath = res.constanciaUrl;
+            item.constanciaName = res.constanciaFilename;
+          }
+          openNotificationDetail(item);
+          await loadDashboard();
+        } catch (err) {
+          showToast(err.message, true);
+          btnFetchMain.disabled = false;
+          btnFetchMain.textContent = '📥 Descargar Sustento / Resolución faltante de SUNAT';
+        }
+      });
+      attachWrap.append(btnFetchMain);
     }
 
     attachBox.append(attachWrap);

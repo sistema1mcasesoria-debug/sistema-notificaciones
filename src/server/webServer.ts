@@ -376,10 +376,23 @@ export function createWebServer(
           return;
         }
 
-        const hasMain = Boolean(notif.attachmentPath && notif.attachmentPath !== 'NONE' && fs.existsSync(notif.attachmentPath));
-        const hasConstancia = Boolean(notif.constanciaPath && notif.constanciaPath !== 'NONE' && fs.existsSync(notif.constanciaPath));
+        const isLegacyConstanciaOnly = Boolean(
+          notif.portal !== 'SUNAFIL' &&
+          notif.attachmentName?.toLowerCase().includes('constancia') &&
+          !notif.constanciaPath
+        );
 
-        if (hasMain || hasConstancia) {
+        const hasMain = Boolean(
+          notif.attachmentPath &&
+          notif.attachmentPath !== 'NONE' &&
+          !isLegacyConstanciaOnly &&
+          fs.existsSync(notif.attachmentPath)
+        );
+        const hasConstancia = Boolean(
+          notif.constanciaPath && notif.constanciaPath !== 'NONE' && fs.existsSync(notif.constanciaPath)
+        );
+
+        if ((hasMain && hasConstancia) || (hasMain && notif.portal === 'SUNAFIL')) {
           sendJson(res, 200, {
             ok: true,
             cached: true,
