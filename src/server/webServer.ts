@@ -376,13 +376,19 @@ export function createWebServer(
           return;
         }
 
-        if (notif.attachmentPath && notif.attachmentPath !== 'NONE' && fs.existsSync(notif.attachmentPath)) {
+        const hasMain = Boolean(notif.attachmentPath && notif.attachmentPath !== 'NONE' && fs.existsSync(notif.attachmentPath));
+        const hasConstancia = Boolean(notif.constanciaPath && notif.constanciaPath !== 'NONE' && fs.existsSync(notif.constanciaPath));
+
+        if (hasMain || hasConstancia) {
           sendJson(res, 200, {
             ok: true,
             cached: true,
-            hasAttachment: true,
-            filename: notif.attachmentName || path.basename(notif.attachmentPath),
-            url: `/api/notifications/${id}/attachment`,
+            hasAttachment: hasMain,
+            filename: notif.attachmentName || (notif.attachmentPath ? path.basename(notif.attachmentPath) : null),
+            url: hasMain ? `/api/notifications/${id}/attachment` : null,
+            hasConstancia,
+            constanciaFilename: notif.constanciaName || (notif.constanciaPath ? path.basename(notif.constanciaPath) : null),
+            constanciaUrl: hasConstancia ? `/api/notifications/${id}/constancia` : null,
             message: 'El archivo adjunto ya se encuentra descargado en el sistema.',
           });
           return;
@@ -444,12 +450,21 @@ export function createWebServer(
               : await downloadNotificationAttachmentFromSunat(creds, target, destDir, config);
 
           if (dlRes.found && dlRes.filePath && dlRes.filename) {
-            clientService.saveNotificationAttachment(id, dlRes.filePath, dlRes.filename);
+            clientService.saveNotificationAttachment(
+              id,
+              dlRes.filePath,
+              dlRes.filename,
+              dlRes.constanciaPath,
+              dlRes.constanciaFilename,
+            );
             sendJson(res, 200, {
               ok: true,
               hasAttachment: true,
               filename: dlRes.filename,
               url: `/api/notifications/${id}/attachment`,
+              hasConstancia: Boolean(dlRes.constanciaPath),
+              constanciaFilename: dlRes.constanciaFilename || null,
+              constanciaUrl: dlRes.constanciaPath ? `/api/notifications/${id}/constancia` : null,
               message: dlRes.message || 'Archivo adjunto descargado con éxito.',
             });
           } else {
@@ -476,7 +491,7 @@ export function createWebServer(
       }
 
       const getAttachMatch = pathname.match(/^\/api\/notifications\/(\d+)\/attachment$/);
-      if (method === 'GET' && getAttachMatch) {
+      if ((method === 'GET' || method === 'HEAD') && getAttachMatch) {
         const id = Number.parseInt(getAttachMatch[1], 10);
         const notif = clientService.getNotificationById(id);
         if (!notif || !notif.attachmentPath || !fs.existsSync(notif.attachmentPath)) {
@@ -500,7 +515,37 @@ export function createWebServer(
           'Content-Type': contentType,
           'Content-Disposition': `inline; filename="${encodeURIComponent(filename)}"`,
         });
+        if (method === 'HEAD') {
+          res.end();
+          return;
+        }
         fs.createReadStream(notif.attachmentPath).pipe(res);
+        return;
+      }
+
+      const getConstanciaMatch = pathname.match(/^\/api\/notifications\/(\d+)\/constancia$/);
+      if ((method === 'GET' || method === 'HEAD') && getConstanciaMatch) {
+        const id = Number.parseInt(getConstanciaMatch[1], 10);
+        const notif = clientService.getNotificationById(id);
+        if (!notif || !notif.constanciaPath || !fs.existsSync(notif.constanciaPath)) {
+          sendJson(res, 404, { error: 'Constancia no encontrada en el servidor.' });
+          return;
+        }
+
+        const ext = path.extname(notif.constanciaPath).toLowerCase();
+        let contentType = 'application/octet-stream';
+        if (ext === '.pdf') contentType = 'application/pdf';
+
+        const filename = notif.constanciaName || path.basename(notif.constanciaPath);
+        res.writeHead(200, {
+          'Content-Type': contentType,
+          'Content-Disposition': `inline; filename="${encodeURIComponent(filename)}"`,
+        });
+        if (method === 'HEAD') {
+          res.end();
+          return;
+        }
+        fs.createReadStream(notif.constanciaPath).pipe(res);
         return;
       }
 

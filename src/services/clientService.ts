@@ -47,6 +47,8 @@ export interface StoredNotification {
   rawRow: Record<string, string>;
   attachmentPath: string | null;
   attachmentName: string | null;
+  constanciaPath?: string | null;
+  constanciaName?: string | null;
 }
 
 export interface CheckRunSummary {
@@ -445,7 +447,9 @@ export class ClientService {
           n.raw_row_json,
           n.first_seen_at,
           n.attachment_path,
-          n.attachment_name
+          n.attachment_name,
+          n.constancia_path,
+          n.constancia_name
         FROM notifications n
         INNER JOIN clients c ON c.id = n.client_id
         ${whereClause}
@@ -471,6 +475,8 @@ export class ClientService {
       first_seen_at: string;
       attachment_path: string | null;
       attachment_name: string | null;
+      constancia_path: string | null;
+      constancia_name: string | null;
     }>;
 
     const notifications = rows.map((r) => {
@@ -503,6 +509,8 @@ export class ClientService {
         rawRow,
         attachmentPath: r.attachment_path || null,
         attachmentName: r.attachment_name || null,
+        constanciaPath: r.constancia_path || null,
+        constanciaName: r.constancia_name || null,
       };
     });
 
@@ -533,10 +541,23 @@ export class ClientService {
     return Number(result.changes) > 0;
   }
 
-  saveNotificationAttachment(id: number, attachmentPath: string, attachmentName: string): boolean {
+  saveNotificationAttachment(
+    id: number,
+    attachmentPath: string,
+    attachmentName: string,
+    constanciaPath?: string,
+    constanciaName?: string,
+  ): boolean {
     const res = this.db
-      .prepare('UPDATE notifications SET attachment_path = ?, attachment_name = ? WHERE id = ?')
-      .run(attachmentPath, attachmentName, id);
+      .prepare(`
+        UPDATE notifications
+        SET attachment_path = ?,
+            attachment_name = ?,
+            constancia_path = COALESCE(?, constancia_path),
+            constancia_name = COALESCE(?, constancia_name)
+        WHERE id = ?
+      `)
+      .run(attachmentPath, attachmentName, constanciaPath || null, constanciaName || null, id);
     return Number(res.changes) > 0;
   }
 
@@ -562,7 +583,9 @@ export class ClientService {
           n.raw_row_json,
           n.first_seen_at,
           n.attachment_path,
-          n.attachment_name
+          n.attachment_name,
+          n.constancia_path,
+          n.constancia_name
         FROM notifications n
         INNER JOIN clients c ON c.id = n.client_id
         WHERE n.id = ?
@@ -588,6 +611,8 @@ export class ClientService {
           first_seen_at: string;
           attachment_path: string | null;
           attachment_name: string | null;
+          constancia_path: string | null;
+          constancia_name: string | null;
         }
       | undefined;
 
@@ -622,6 +647,8 @@ export class ClientService {
       rawRow,
       attachmentPath: row.attachment_path || null,
       attachmentName: row.attachment_name || null,
+      constanciaPath: row.constancia_path || null,
+      constanciaName: row.constancia_name || null,
     };
   }
 

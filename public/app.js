@@ -529,7 +529,7 @@ function renderNotifications(notifications) {
     const tdSubject = document.createElement('td');
     tdSubject.append(el('span', 'cell-primary', item.subject));
     const subParts = [item.sender, item.notificationType, item.readStatusSunat].filter(Boolean);
-    if (item.attachmentPath) {
+    if (item.attachmentPath || item.constanciaPath) {
       subParts.push('📎 Adjunto listo');
     }
     if (subParts.length > 0) {
@@ -983,16 +983,34 @@ function openNotificationDetail(item) {
   const attachTitle =
     portal === 'SUNAFIL'
       ? 'Documento Oficial SUNAFIL (PDF)'
-      : 'Archivo Adjunto / Constancia SUNAT';
+      : 'Documentos SUNAT (Resolución / Sustento y Constancia)';
   attachBox.append(el('span', 'detail-item-label', attachTitle));
 
-  if (item.attachmentPath && item.attachmentPath !== 'NONE' && item.attachmentName !== 'SIN_ADJUNTO') {
+  const hasMainDoc = item.attachmentPath && item.attachmentPath !== 'NONE' && item.attachmentName !== 'SIN_ADJUNTO';
+  const hasConstancia = item.constanciaPath && item.constanciaPath !== 'NONE';
+
+  if (hasMainDoc || hasConstancia) {
     const attachWrap = el('div', 'attach-actions');
-    const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir / Descargar (${item.attachmentName || 'Documento PDF'})`);
-    btnView.href = `/api/notifications/${item.id}/attachment`;
-    btnView.target = '_blank';
-    btnView.rel = 'noopener noreferrer';
-    attachWrap.append(btnView);
+    attachWrap.style.display = 'flex';
+    attachWrap.style.flexDirection = 'column';
+    attachWrap.style.gap = '8px';
+
+    if (hasMainDoc) {
+      const btnView = el('a', 'btn btn-primary btn-sm', `📄 Abrir Sustento / Resolución (${item.attachmentName || 'Documento PDF'})`);
+      btnView.href = `/api/notifications/${item.id}/attachment`;
+      btnView.target = '_blank';
+      btnView.rel = 'noopener noreferrer';
+      attachWrap.append(btnView);
+    }
+
+    if (hasConstancia) {
+      const btnConstancia = el('a', 'btn btn-secondary btn-sm', `📄 Abrir Constancia de Notificación (${item.constanciaName || 'Constancia PDF'})`);
+      btnConstancia.href = `/api/notifications/${item.id}/constancia`;
+      btnConstancia.target = '_blank';
+      btnConstancia.rel = 'noopener noreferrer';
+      attachWrap.append(btnConstancia);
+    }
+
     attachBox.append(attachWrap);
   } else if (item.attachmentName === 'SIN_ADJUNTO' || item.attachmentPath === 'NONE') {
     const emptyMsg =
@@ -1011,7 +1029,7 @@ function openNotificationDetail(item) {
     const dlBtnText =
       portal === 'SUNAFIL'
         ? '📥 Descargar Documento de SUNAFIL (PDF)'
-        : '📥 Descargar Adjunto de SUNAT';
+        : '📥 Descargar Documentos de SUNAT (Resolución y Constancia)';
     const btnDownload = el('button', 'btn btn-secondary btn-sm', dlBtnText);
     btnDownload.type = 'button';
     btnDownload.addEventListener('click', async () => {
@@ -1032,6 +1050,10 @@ function openNotificationDetail(item) {
         } else {
           item.attachmentPath = 'NONE';
           item.attachmentName = 'SIN_ADJUNTO';
+        }
+        if (res.hasConstancia && res.constanciaUrl) {
+          item.constanciaPath = res.constanciaUrl;
+          item.constanciaName = res.constanciaFilename;
         }
         openNotificationDetail(item);
         await loadDashboard();

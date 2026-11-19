@@ -1338,8 +1338,85 @@ export async function downloadNotificationAttachmentFromSunat(
       );
     } catch {}
 
-    // 3. Buscar enlace o botón de descarga de archivo (constancia, resolución, anexo, PDF, TXT, ZIP, etc.)
+    // 3. Buscar enlace de documento de sustento/resolución y constancia
+    console.log(`[Scraper] Buscando documentos en los ${activePage.frames().length} frames de SUNAT...`);
+    let docDownloadResult: { filename: string; filePath: string } | null = null;
+    let constanciaDownloadResult: { filename: string; filePath: string } | null = null;
+
+    if (!fs.existsSync(destinationDir)) {
+      fs.mkdirSync(destinationDir, { recursive: true });
+    }
+
+    // Paso A: Buscar primero el Documento Principal / Sustento (Resolución Coactiva, Esquela, Orden de Pago, etc.)
+    for (const frame of activePage.frames()) {
+      try {
+        const docBtn = frame.locator('a[href*="goArchivoDescarga" i], a[onclick*="goArchivoDescarga" i]').first();
+        if (await docBtn.isVisible({ timeout: 1200 }).catch(() => false)) {
+          const txt = (await docBtn.textContent().catch(() => ''))?.trim();
+          console.log(`[Scraper] ¡DOCUMENTO PRINCIPAL ENCONTRADO! Frame: "${frame.name()}" | Texto: "${txt}"`);
+          console.log(`[Scraper] Iniciando descarga de Documento Principal...`);
+          const [dl] = await Promise.all([
+            activePage.waitForEvent('download', { timeout: 15000 }).catch(() => null),
+            docBtn.click({ timeout: 4000 }).catch(() => {}),
+          ]);
+          if (dl) {
+            const originalFilename = dl.suggestedFilename() || 'resolucion.pdf';
+            const cleanCode = (target.sunatCode || 'notif').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const finalFilename = `${cleanCode}_${originalFilename}`;
+            const filePath = path.join(destinationDir, finalFilename);
+            await dl.saveAs(filePath);
+            console.log(`[Scraper] Documento Principal guardado: ${filePath} (${fs.statSync(filePath).size} bytes)`);
+            docDownloadResult = { filename: finalFilename, filePath };
+            break;
+          }
+        }
+      } catch (err) {
+        console.log(`[Scraper] Error intentando descargar documento principal:`, (err as Error).message);
+      }
+    }
+
+    // Paso B: Buscar la Constancia de Notificación
+    for (const frame of activePage.frames()) {
+      try {
+        const cBtn = frame.locator('a[href*="bajarArchivo" i], a:has-text("constancia.pdf"), a#btnPaso03').first();
+        if (await cBtn.isVisible({ timeout: 1200 }).catch(() => false)) {
+          console.log(`[Scraper] Descargando Constancia de Notificación...`);
+          const [dl] = await Promise.all([
+            activePage.waitForEvent('download', { timeout: 12000 }).catch(() => null),
+            cBtn.click({ timeout: 4000 }).catch(() => {}),
+          ]);
+          if (dl) {
+            const originalFilename = dl.suggestedFilename() || 'constancia.pdf';
+            const cleanCode = (target.sunatCode || 'notif').replace(/[^a-zA-Z0-9_-]/g, '_');
+            const finalFilename = `${cleanCode}_${originalFilename}`;
+            const filePath = path.join(destinationDir, finalFilename);
+            await dl.saveAs(filePath);
+            console.log(`[Scraper] Constancia guardada: ${filePath} (${fs.statSync(filePath).size} bytes)`);
+            constanciaDownloadResult = { filename: finalFilename, filePath };
+            break;
+          }
+        }
+      } catch (err) {
+        console.log(`[Scraper] Error intentando descargar constancia:`, (err as Error).message);
+      }
+    }
+
+    if (docDownloadResult || constanciaDownloadResult) {
+      await tryLogout(page);
+      return {
+        found: true,
+        filename: docDownloadResult?.filename || constanciaDownloadResult?.filename,
+        filePath: docDownloadResult?.filePath || constanciaDownloadResult?.filePath,
+        constanciaFilename: docDownloadResult ? constanciaDownloadResult?.filename : undefined,
+        constanciaPath: docDownloadResult ? constanciaDownloadResult?.filePath : undefined,
+        message: docDownloadResult && constanciaDownloadResult
+          ? 'Resolución y Constancia descargadas exitosamente de SUNAT.'
+          : 'Archivo adjunto descargado exitosamente de SUNAT.',
+      };
+    }
+
     const downloadCandidates = [
+      'a[href*="bajarArchivo" i]:not([href*="constancia"])',
       'a[href*="bajarArchivo" i]',
       'a[href*="bajar" i]:not([href*="MenuInternet"]):not([href*="itmenu"])',
       'a[href*=".txt" i]',
@@ -1376,7 +1453,9 @@ export async function downloadNotificationAttachmentFromSunat(
         try {
           const dlBtn = frame.locator(sel).first();
           if (await dlBtn.isVisible({ timeout: 1000 })) {
+            const btnText = (await dlBtn.textContent().catch(() => ''))?.trim();
             const href = await dlBtn.getAttribute('href');
+            console.log(`[Scraper] Encontrado candidato de descarga: "${sel}" en frame "${frame.name()}" | Texto: "${btnText}" | Href: "${href}"`);
 
             // Intento 1: clic con escucha de evento download
             const [download] = await Promise.all([

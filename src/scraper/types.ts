@@ -58,5 +58,7 @@ export interface AttachmentDownloadResult {
   found: boolean;
   filename?: string;
   filePath?: string;
+  constanciaFilename?: string;
+  constanciaPath?: string;
   message?: string;
 }

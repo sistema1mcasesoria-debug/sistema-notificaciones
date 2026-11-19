@@ -185,6 +185,22 @@ function initializeSchema(db: DatabaseSync): void {
       'v8_add_sunafil_support',
     );
   }
+
+  const appliedV9 = db
+    .prepare('SELECT 1 FROM schema_migrations WHERE id = ?')
+    .get('v9_add_constancia_support');
+
+  if (!appliedV9) {
+    try {
+      db.prepare('ALTER TABLE notifications ADD COLUMN constancia_path TEXT').run();
+    } catch {}
+    try {
+      db.prepare('ALTER TABLE notifications ADD COLUMN constancia_name TEXT').run();
+    } catch {}
+    db.prepare('INSERT INTO schema_migrations (id) VALUES (?)').run(
+      'v9_add_constancia_support',
+    );
+  }
 }
 
 export function closeDatabase(): void {
