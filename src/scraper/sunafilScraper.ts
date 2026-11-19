@@ -332,7 +332,7 @@ export async function checkSunafilMailbox(
     const context = await browser.newContext({
       locale: 'es-PE',
       timezoneId: 'America/Lima',
-      viewport: { width: 1366, height: 768 },
+      viewport: { width: 1400, height: 900 },
       userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
     });
 
@@ -423,7 +423,7 @@ export async function downloadSunafilAttachment(
     const context = await browser.newContext({
       locale: 'es-PE',
       timezoneId: 'America/Lima',
-      viewport: { width: 1366, height: 768 },
+      viewport: { width: 1400, height: 900 },
       acceptDownloads: true,
       userAgent: `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${majorVersion}.0.0.0 Safari/537.36`,
     });
@@ -516,12 +516,13 @@ export async function downloadSunafilAttachment(
     await docBtn.click();
     await page.waitForTimeout(1500);
 
-    // 5. Clic en "Descargar" dentro del modal con listener de descarga
-    const modal = page.locator('#formDescargaDoc\\:mdDescargaDoc, .scDescargaDoc, [id*="DescargaDoc"]').first();
-    await modal.waitFor({ state: 'visible', timeout: 6000 }).catch(() => {});
-    const modalDownloadBtn = modal.locator('button:has-text("Descargar"), a:has-text("Descargar")').first();
+    // 5. Clic en "Descargar" dentro del modal abierto (.modal.in) con listener de descarga
+    const modalDownloadBtn = page
+      .locator('.modal.in button, .modal.show button, .scDescargaDoc.modal button, .scDescargaDocPV.modal button')
+      .filter({ hasText: 'Descargar' })
+      .first();
 
-    if (!(await modalDownloadBtn.isVisible({ timeout: 4000 }).catch(() => false))) {
+    if (!(await modalDownloadBtn.isVisible({ timeout: 6000 }).catch(() => false))) {
       return {
         found: false,
         message: 'No se abrió el modal de descarga de documento en SUNAFIL.',
